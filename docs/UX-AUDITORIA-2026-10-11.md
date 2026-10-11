@@ -55,3 +55,14 @@ Roteiro a ensaiar; duração e eficácia ainda não medidas. Usar fixture explic
 - 70–90s: mostrar o conteúdo de uma versão publicada fictícia e a próxima decisão: combinar com o cliente uma entrega pequena, o responsável pelo aceite e como verificar resultado.
 
 Destrava uma demonstração honesta de diagnóstico/revisão e reduz perda/repetição de trabalho. Não representa execução automática de infraestrutura, IA paga pronta, piloto contratado ou integração já publicada. Próxima ação real: revisar com um potencial cliente as informações faltantes e um escopo com aceite verificável; nenhuma mensagem, postagem ou cobrança foi enviada.
+
+## Execução confirmada na CI
+Código validado: `58dcbf0ef8ef70ed5fc587e6b09d3d892eecd7a5`, PR [#2](https://github.com/ofelipepeixoto/camaleao-infra-portal/pull/2).
+[Run 38119159119](https://github.com/ofelipepeixoto/camaleao-infra-portal/actions/runs/38119159119), GitHub Actions/Ubuntu com Node 24 e pnpm 11.25.0:
+- Offline: 23 testes Python aprovados e demonstração determinística concluída.
+- Portal: 32 testes Node aprovados (22 existentes + 10 novos), 0 falhas.
+- Build: instalação congelada, lint dos arquivos de cliente alterados, TypeScript e build Vinext aprovados.
+- Navegador: fixture do PortalClient/CSS em Chrome real, quatro cenários aprovados em 1280px e novamente em 320px (oito execuções). Inclui confirmação desmarcada na versão 2 com mesmo hash, retomada de texto/etapa, foco de erro e recuperação sem novo POST.
+- HTTP/identidade da fixture são fictícios; o servidor de arquivos é local ao runner. Não há teste da hospedagem, integração real ChatGPT ou alteração de D1 neste resultado.
+
+Revisão final do diff: mudanças em interface, helper de recuperação, testes, CI e este relatório; nenhum delta em portal-service.mjs, portal-http.mjs, schema/migrações, autenticação, permissões, orçamento ou consentimento. Nenhum merge/deploy foi executado. A atualização posterior deste relatório altera somente documentação; resultados acima pertencem ao SHA explicitado.
