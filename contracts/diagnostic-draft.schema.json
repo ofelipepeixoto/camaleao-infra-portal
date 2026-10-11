@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "goal_summary", "recommendation", "alternatives", "missing_information", "evidence_refs", "cost_status", "human_review"],
+  "properties": {
+    "status": {"type": "string", "enum": ["draft"]},
+    "goal_summary": {"type": "string"},
+    "recommendation": {"type": "string"},
+    "alternatives": {"type": "array", "items": {"type": "string"}},
+    "missing_information": {"type": "array", "items": {"type": "string"}},
+    "evidence_refs": {"type": "array", "items": {"type": "string"}},
+    "cost_status": {"type": "string", "enum": ["unverified"]},
+    "human_review": {"type": "boolean", "enum": [true]}
+  }
+}

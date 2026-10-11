@@ -1,0 +1,13 @@
+{
+  "kind": "planning_blueprints_not_importable_workflows",
+  "version": "0.1.0",
+  "active": false,
+  "workflows": [
+    {"id": "intake_received", "trigger": "signed_outbox_event", "steps": ["backend_validate", "persist_receipt", "enqueue_human_review"], "effect": "internal_queue"},
+    {"id": "diagnostic_reviewed", "trigger": "signed_outbox_event", "steps": ["verify_human_review_and_version", "publish_via_backend", "prepare_notification"], "effect": "controlled_publication"},
+    {"id": "proposal_accepted", "trigger": "signed_outbox_event", "steps": ["verify_commercial_acceptance", "prepare_project", "assign_operator"], "effect": "internal_project_preparation"},
+    {"id": "operation_report", "trigger": "authorized_schedule", "steps": ["read_scoped_usage", "compare_limits", "prepare_reviewable_report"], "effect": "internal_report"}
+  ],
+  "required_controls": ["authenticated_backend", "durable_inbox_outbox", "schema_validation", "signature_and_expiry", "tenant_scope", "idempotency", "bounded_retries", "unknown_result_reconciliation", "cost_reservation", "redacted_logs"],
+  "pending": ["n8n_version_inventory", "license_review", "safe_credentials", "actual_workflow_implementation", "end_to_end_acceptance"]
+}

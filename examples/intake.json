@@ -1,0 +1,8 @@
+{
+  "goal": "documents",
+  "sensitivity": "normal",
+  "external_processing_allowed": false,
+  "existing_tools": ["VPS", "n8n"],
+  "users": 3,
+  "monthly_budget_brl": null
+}

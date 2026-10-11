@@ -1,0 +1,10 @@
+{
+  "version": "0.1.0",
+  "brand": "Agência Camaleão",
+  "status": "planning_catalog",
+  "services": [
+    {"id": "document_search", "name": "Encontrar informações nos documentos", "first_result": "Piloto com fontes visíveis e permissões", "human_review": true},
+    {"id": "process_automation", "name": "Organizar tarefas repetitivas", "first_result": "Uma automação delimitada com recuperação de falhas", "human_review": true},
+    {"id": "assisted_support", "name": "Melhorar o atendimento", "first_result": "Triagem assistida com caminho para uma pessoa", "human_review": true}
+  ]
+}
