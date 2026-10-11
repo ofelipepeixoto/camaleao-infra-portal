@@ -24,3 +24,32 @@ jobs:
           node-version: '24'
       - name: Test persistent workflow and HTTP access boundary
         run: node --test apps/site/tests/*.test.mjs
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/site
+    env:
+      NEXT_TELEMETRY_DISABLED: '1'
+      WRANGLER_SEND_METRICS: 'false'
+      CLOUDFLARE_CF_FETCH_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Install the project's pinned package manager
+        run: npm install --global pnpm@11.25.0 --ignore-scripts --no-audit --no-fund
+      - name: Install existing locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check changed client code
+        run: pnpm exec eslint app/portal-client.tsx lib/portal-client-state.mjs lib/portal-client-state.d.mts tests/client-state.test.mjs
+      - name: Check TypeScript
+        run: pnpm exec tsc --noEmit
+      - name: Build without publishing
+        run: npm run build
+      - name: Build isolated UI fixture with existing dependencies
+        run: pnpm exec vite build --config tests/ui/vite.config.ts
+      - name: Exercise client UI in Chrome with synthetic HTTP
+        run: node tests/ui/run-browser.mjs
