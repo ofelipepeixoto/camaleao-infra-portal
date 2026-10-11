@@ -245,7 +245,7 @@ test('real SQLite HTTP journey maps intake, preparation, human review and exact 
   const db = await database(); t.after(() => db.close());
   const url = 'https://infra.camaleaoweb3.com.br/api/portal';
   const http = async (subject, body) => {
-    const request = new Request(url, body ? { method: 'POST', headers: { Origin: new URL(url).origin, 'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+    const request = new Request(url, body ? { method: 'POST', headers: { Origin: new URL(url).origin, 'Sec-Fetch-Site': 'same-origin', 'Content-Type': 'application/json', 'X-Portal-Subject': subject }, body: JSON.stringify(body) } : {});
     const response = await portalHttp(request, { user: { userId: subject, displayName: subject }, db, reviewerSubject: REVIEWER, service: handlePortal });
     return { status: response.status, payload: await response.json() };
   };
@@ -263,4 +263,159 @@ test('real SQLite HTTP journey maps intake, preparation, human review and exact 
   assert.equal(publication.status, 200);
   const final = await http('new-client'); assert.equal(final.status, 200); const published = final.payload.cases[0].published;
   assert.equal(published.version, reviewed.version); assert.equal(published.hash, reviewed.hash); assert.deepEqual(published.content, reviewed.draft.content);
+});
+
+
+async function publish(db, subject = 'client-a') {
+  const record = await review(db, await draft(db, subject));
+  return (await call(db, REVIEWER, 'publish', { id: record.id, version: record.version, hash: record.hash })).record;
+}
+const publication = record => ({ id: record.id, version: record.published_version, hash: record.published_hash });
+
+test('individual revocation hides exact publication while preserving unrelated records and immutable history', async t => {
+  const db = await setup(t), a = await publish(db), untouched = await publish(db), b = await publish(db, 'client-b');
+  const history = db.sqlite.prepare('SELECT * FROM portal_revisions WHERE intake_id = ? ORDER BY version').all(a.id);
+  const approval = db.sqlite.prepare('SELECT * FROM portal_approvals WHERE intake_id = ?').all(a.id);
+  const revoked = (await call(db, REVIEWER, 'revoke', publication(a))).record;
+  assert.equal(revoked.stage, 'draft'); assert.equal(revoked.publication_revoked, true);
+  assert.equal(revoked.version, a.version); assert.equal(revoked.hash, a.hash);
+  assert.equal(revoked.published_diagnostic, null); assert.equal(revoked.published_hash, null);
+  assert.deepEqual(db.sqlite.prepare('SELECT * FROM portal_revisions WHERE intake_id = ? ORDER BY version').all(a.id), history);
+  assert.deepEqual(db.sqlite.prepare('SELECT * FROM portal_approvals WHERE intake_id = ?').all(a.id), approval);
+  const hidden = (await call(db, 'client-a', 'read', { id: a.id })).record;
+  assert.equal(hidden.diagnostic, null); assert.equal(hidden.published_diagnostic, null);
+  for (const [subject, record] of [['client-a', untouched], ['client-b', b]]) {
+    const visible = (await call(db, subject, 'read', { id: record.id })).record;
+    assert.equal(visible.publication_revoked, false); assert.equal(visible.published_hash, record.hash);
+  }
+  assert.equal((await call(db, 'client-a', 'session')).membership_active, true);
+  const event = db.sqlite.prepare("SELECT actor_subject, version, hash FROM portal_audit WHERE intake_id = ? AND event = 'diagnostic_revoked'").get(a.id);
+  assert.equal(event.actor_subject, REVIEWER); assert.equal(event.version, a.version); assert.equal(event.hash, a.hash);
+});
+
+test('revocation requires reviewer, exact publication and no forged extra fields', async t => {
+  const db = await setup(t), record = await publish(db);
+  for (const subject of ['client-a', 'client-b']) await rejection(call(db, subject, 'revoke', publication(record)), 403);
+  for (const changed of [{ version: 1 }, { hash: '0'.repeat(64) }])
+    await rejection(call(db, REVIEWER, 'revoke', { ...publication(record), ...changed }), 409);
+  await rejection(call(db, REVIEWER, 'revoke', { ...publication(record), owner_subject: 'client-b' }), 400);
+  assert.equal((await call(db, 'client-a', 'read', { id: record.id })).record.published_hash, record.hash);
+  assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM portal_audit WHERE event = 'diagnostic_revoked'").get().n, 0);
+});
+
+test('revoked approval never republishes; a new human revision must be confirmed separately', async t => {
+  const db = await setup(t), record = await publish(db);
+  await call(db, REVIEWER, 'revoke', publication(record));
+  await rejection(call(db, REVIEWER, 'publish', publication(record)), 409);
+  // Defense in depth: even an incorrectly restored stage cannot reuse the revoked approval.
+  db.sqlite.prepare("UPDATE portal_intakes SET stage = 'reviewed' WHERE id = ?").run(record.id);
+  await rejection(call(db, REVIEWER, 'publish', publication(record)), 409);
+  const newer = await review(db, (await call(db, REVIEWER, 'read', { id: record.id })).record);
+  assert.equal(newer.version, record.version + 1); assert.equal(newer.hash, record.hash);
+  assert.equal((await call(db, 'client-a', 'read', { id: record.id })).record.published_diagnostic, null);
+  await rejection(call(db, REVIEWER, 'publish', publication(record)), 409);
+  await call(db, REVIEWER, 'publish', { id: newer.id, version: newer.version, hash: newer.hash });
+  const visible = (await call(db, 'client-a', 'read', { id: record.id })).record;
+  assert.equal(visible.published_version, newer.version); assert.equal(visible.publication_revoked, false);
+});
+
+test('revoking an older publication preserves a newer approved revision without publishing it', async t => {
+  const db = await setup(t), old = await publish(db);
+  const newer = await review(db, old);
+  const revoked = (await call(db, REVIEWER, 'revoke', publication(old))).record;
+  assert.equal(revoked.version, newer.version); assert.equal(revoked.stage, 'reviewed');
+  assert.equal(revoked.approval.version, newer.version); assert.equal(revoked.published_diagnostic, null);
+  await call(db, REVIEWER, 'publish', { id: newer.id, version: newer.version, hash: newer.hash });
+  assert.equal((await call(db, 'client-a', 'read', { id: old.id })).record.published_version, newer.version);
+});
+
+test('duplicate and concurrent revocations create one event; state reconciliation does not replay writes', async t => {
+  const db = await setup(t), record = await publish(db), body = publication(record);
+  const results = await Promise.allSettled([call(db, REVIEWER, 'revoke', body), call(db, REVIEWER, 'revoke', body)]);
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(results.filter(result => result.status === 'rejected' && result.reason.status === 409).length, 1);
+  await rejection(call(db, REVIEWER, 'revoke', body), 409);
+  // Lost mutation response: fetch the durable state instead of interpreting a timeout as cancellation.
+  assert.equal((await call(db, REVIEWER, 'read', { id: record.id })).record.publication_revoked, true);
+  assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM portal_audit WHERE event = 'diagnostic_revoked'").get().n, 1);
+});
+
+test('reviewer revocation between read and write prevents publication revocation atomically', async t => {
+  const db = await setup(t), record = await publish(db);
+  db.beforeBatch = async () => { db.sqlite.prepare('UPDATE portal_memberships SET active = 0 WHERE subject = ?').run(REVIEWER); };
+  await rejection(call(db, REVIEWER, 'revoke', publication(record)), 409);
+  assert.equal((await call(db, 'client-a', 'read', { id: record.id })).record.published_hash, record.hash);
+  assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM portal_audit WHERE event = 'diagnostic_revoked'").get().n, 0);
+});
+
+test('a newer publication racing an older revocation is never removed by stale confirmation', async t => {
+  const db = await setup(t), old = await publish(db), newer = await review(db, old);
+  db.beforeBatch = () => call(db, REVIEWER, 'publish', { id: newer.id, version: newer.version, hash: newer.hash });
+  await rejection(call(db, REVIEWER, 'revoke', publication(old)), 409);
+  const visible = (await call(db, 'client-a', 'read', { id: old.id })).record;
+  assert.equal(visible.published_version, newer.version); assert.equal(visible.published_hash, newer.hash);
+  assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM portal_audit WHERE event = 'diagnostic_revoked'").get().n, 0);
+});
+
+test('audit failure rolls back individual publication revocation', async t => {
+  const db = await setup(t), record = await publish(db);
+  db.sqlite.exec("CREATE TRIGGER fail_revocation_audit BEFORE INSERT ON portal_audit WHEN NEW.event = 'diagnostic_revoked' BEGIN SELECT RAISE(ABORT, 'test revoke audit failure'); END");
+  await assert.rejects(call(db, REVIEWER, 'revoke', publication(record)), /test revoke audit failure/);
+  const visible = (await call(db, 'client-a', 'read', { id: record.id })).record;
+  assert.equal(visible.stage, 'published'); assert.equal(visible.published_version, record.version);
+});
+
+test('fresh HTTP sessions preserve approved exact version and enforce both directions of client isolation', async t => {
+  const db = await setup(t), a = await publish(db), b = await publish(db, 'client-b');
+  const http = async (subject, body, expectedSubject = subject) => {
+    const request = new Request('https://example.invalid/api/portal', body ? { method: 'POST', headers: { Origin: 'https://example.invalid', 'Content-Type': 'application/json', 'X-Portal-Subject': expectedSubject }, body: JSON.stringify(body) } : {});
+    const response = await portalHttp(request, { user: { userId: subject, displayName: 'Synthetic identity' }, db, reviewerSubject: REVIEWER, service: handlePortal });
+    assert.equal(response.headers.get('cache-control'), 'private, no-store');
+    return { status: response.status, payload: await response.json() };
+  };
+  for (const [subject, own, other] of [['client-a', a, b], ['client-b', b, a], ['client-a', a, b]]) {
+    const fresh = await http(subject);
+    assert.equal(fresh.status, 200); assert.deepEqual(fresh.payload.cases.map(item => item.id), [own.id]);
+    const saved = fresh.payload.cases[0].published;
+    assert.equal(saved.version, own.version); assert.equal(saved.hash, own.hash); assert.deepEqual(saved.content, own.diagnostic);
+    await rejection(call(db, subject, 'read', { id: other.id }), 404);
+    const cross = await http(subject, { action: 'generate', case_id: other.id, version: other.version, confirm: true });
+    assert.equal(cross.status, 404); assert.equal(cross.payload.case, undefined);
+  }
+  const switched = await http(REVIEWER, { action: 'revoke', case_id: a.id, version: a.version, hash: a.hash }, 'client-a');
+  assert.equal(switched.status, 409); assert.equal(switched.payload.code, 'session_changed');
+  assert.equal((await call(db, 'client-a', 'read', { id: a.id })).record.published_hash, a.hash);
+  const revoked = await http(REVIEWER, { action: 'revoke', case_id: a.id, version: a.version, hash: a.hash });
+  assert.equal(revoked.status, 200); assert.equal(revoked.payload.case.publication_revoked, true);
+  const fresh = (await http('client-a')).payload.cases[0];
+  assert.equal(fresh.published, null); assert.equal(fresh.draft, null); assert.equal(fresh.publication_revoked, true);
+  assert.equal((await http('client-b')).payload.cases[0].published.hash, b.hash);
+});
+
+test('offline SQLite snapshot restore preserves publication, revocation, inactive membership and cross-client denial', async t => {
+  const { copyFile } = await import('node:fs/promises');
+  const directory = await mkdtemp(join(tmpdir(), 'camaleao-restore-')); t.after(() => rm(directory, { recursive: true, force: true }));
+  const livePath = join(directory, 'synthetic.sqlite'), backupPath = join(directory, 'snapshot.sqlite'), restoredPath = join(directory, 'restored.sqlite');
+  let db = await database(livePath); await call(db, REVIEWER, 'session');
+  const revoked = await publish(db), visible = await publish(db), b = await publish(db, 'client-b'), inactive = await publish(db, 'client-c');
+  await call(db, REVIEWER, 'revoke', publication(revoked));
+  db.sqlite.prepare('UPDATE portal_memberships SET active = 0 WHERE subject = ?').run('client-c');
+  const audit = db.sqlite.prepare('SELECT * FROM portal_audit ORDER BY id').all();
+  db.close(); await copyFile(livePath, backupPath);
+  // Restore into a separate local DB only, after the synthetic source is closed.
+  await copyFile(backupPath, restoredPath); db = await database(restoredPath, false); t.after(() => db.close());
+  assert.equal(db.sqlite.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+  assert.deepEqual(db.sqlite.prepare('PRAGMA foreign_key_check').all(), []);
+  assert.deepEqual(db.sqlite.prepare('SELECT * FROM portal_audit ORDER BY id').all(), audit);
+  await call(db, 'client-a', 'session');
+  const recovered = (await call(db, 'client-a', 'read', { id: visible.id })).record;
+  assert.equal(recovered.published_version, visible.version); assert.equal(recovered.published_hash, visible.hash);
+  assert.deepEqual(recovered.published_diagnostic, visible.diagnostic);
+  const denied = (await call(db, 'client-a', 'read', { id: revoked.id })).record;
+  assert.equal(denied.publication_revoked, true); assert.equal(denied.diagnostic, null); assert.equal(denied.published_diagnostic, null);
+  await rejection(call(db, REVIEWER, 'publish', publication(revoked)), 409);
+  await rejection(call(db, 'client-b', 'read', { id: visible.id }), 404);
+  await rejection(call(db, 'client-a', 'read', { id: b.id }), 404);
+  await rejection(call(db, 'client-c', 'read', { id: inactive.id }), 404);
+  assert.equal((await call(db, 'client-c', 'session')).membership_active, false);
 });

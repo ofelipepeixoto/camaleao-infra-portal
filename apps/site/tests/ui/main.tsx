@@ -6,26 +6,35 @@ import "../../app/globals.css";
 
 declare global { interface Window { __uiResult?: { status: string; checks: string[]; error?: string }; } }
 const checks: string[] = [];
-const user = { userId: "synthetic-ui-user", displayName: "Pessoa fictícia" };
+let user = { userId: "synthetic-ui-user", displayName: "Pessoa fictícia" };
 const diagnostic = { status: "draft", goal_summary: "Necessidade fictícia", recommendation: "Recomendação fictícia", alternatives: [], missing_information: ["Confirmar escopo do piloto"], evidence_refs: ["intake:ficticio"], cost_status: "unverified", human_review: true };
 const original = { id: "11111111-1111-4111-8111-111111111111", status: "draft", version: 1, hash: "same-content-hash", intake: { goal: "documents", existing_tools: [], users: 1, sensitivity: "restricted", external_processing_allowed: false, monthly_budget_brl: null }, draft: { version: 1, hash: "same-content-hash", content: diagnostic }, published: null };
 let role = "client";
-let records: typeof original[] = [];
+type SyntheticCase = Omit<typeof original, "published"> & { published: typeof original.draft | null; publication_revoked?: boolean };
+let records: SyntheticCase[] = [];
 let readFailure = false;
 let failAfterWrite = false;
+let lostWriteResponse = false;
+let deniedRead = false;
+let lastMutation: Record<string, unknown> | null = null;
 let posts = 0;
 let epoch = 0;
 const root = createRoot(document.getElementById("root")!);
 window.fetch = async (input, init) => {
   if (input !== "/api/portal") throw new Error("Unexpected network destination in isolated test");
   if (init?.method === "POST") {
+    if (new Headers(init.headers).get("X-Portal-Subject") !== user.userId) return Response.json({ error: "Changed identity", code: "session_changed" }, { status: 409 });
     posts++;
     const body = JSON.parse(String(init.body));
-    if (body.action !== "review") throw new Error("Unexpected mutation in synthetic test");
-    records = [{ ...records[0], version: 2, status: "reviewed", draft: { ...records[0].draft, version: 2 } }];
+    lastMutation = body;
+    if (body.action === "review") records = [{ ...records[0], version: 2, status: "reviewed", draft: { ...records[0].draft, version: 2 } }];
+    else if (body.action === "revoke") records = [{ ...records[0], status: "draft", published: null, publication_revoked: true }];
+    else throw new Error("Unexpected mutation in synthetic test");
+    if (lostWriteResponse) throw new Error("Synthetic response lost after commit");
     if (failAfterWrite) readFailure = true;
     return Response.json({ case: records[0] });
   }
+  if (deniedRead) return Response.json({ error: "Synthetic denied membership" }, { status: 403 });
   if (readFailure) throw new Error("Synthetic read failure");
   return Response.json({ user, role, cases: records, apiConfigured: false });
 };
@@ -105,6 +114,51 @@ async function run() {
   await wait(() => !document.querySelector('[role="alert"]'), "Recovery did not clear error");
   assert(!checkbox().checked && button("Publicar versão aprovada")?.disabled, "Recovery bypassed separate publication confirmation");
   checks.push("acknowledged write plus failed refresh recovers without replay");
+  const published = { ...structuredClone(original), status: "published", version: 2, draft: { ...original.draft, version: 2 }, published: { ...original.draft, version: 2 } };
+  records = [published]; posts = 0; lostWriteResponse = true; mount();
+  await wait(() => button("Revogar publicação"), "Missing revocation control");
+  assert(button("Revogar publicação")?.disabled, "Revocation requires exact confirmation");
+  assert(document.querySelector(".revoke-action")?.textContent?.includes("versão 2"), "Revocation must identify published version");
+  document.querySelector<HTMLInputElement>(".revoke-action input")!.click();
+  await click("Revogar publicação");
+  await wait(() => document.body.textContent?.includes("Não foi possível confirmar o resultado"), "Lost response was not marked uncertain");
+  assert(posts === 1 && button("Revogar publicação")?.disabled, "Uncertain revocation must not be replayed");
+  lostWriteResponse = false;
+  await click("Conferir estado salvo");
+  await wait(() => document.body.textContent?.includes("A publicação anterior foi revogada"), "Revoked state not reconciled");
+  assert(!button("Revogar publicação") && !button("Publicar versão aprovada"), "Revoked approval was reused");
+  assert(posts === 1, "State reconciliation repeated a write");
+  assert(lastMutation?.case_id === original.id && lastMutation?.version === 2 && lastMutation?.hash === original.hash, "Revocation targeted a different publication");
+  assert(document.documentElement.scrollWidth <= innerWidth + 1, "Revocation overflows viewport");
+  checks.push("exact revocation requires confirmation and reconciles lost response without replay");
+
+  role = "client"; records = [published]; mount();
+  await wait(() => document.body.textContent?.includes("Seu diagnóstico publicado"), "Client publication missing");
+  assert(!button("Revogar publicação"), "Client received revocation controls");
+  user = { userId: "synthetic-client-b", displayName: "Outra pessoa fictícia" }; records = [];
+  await click("Atualizar");
+  await wait(() => document.body.textContent?.includes("Sua primeira solução começa"), "Changed account did not refresh");
+  assert(!document.body.textContent?.includes(diagnostic.recommendation), "Changed account retained previous publication");
+  checks.push("account switch clears previous publication and does not expose reviewer controls");
+
+  role = "reviewer"; records = [published]; mount();
+  await wait(() => button("Revogar publicação"), "Reviewer restore missing");
+  document.querySelector<HTMLInputElement>(".revoke-action input")!.click();
+  user = { userId: "synthetic-session-switched", displayName: "Sessão alterada" };
+  posts = 0;
+  await click("Revogar publicação");
+  await wait(() => document.body.textContent?.includes("A conta mudou"), "Missing identity-precondition warning");
+  assert(posts === 0, "A confirmation from the previous account changed data");
+  assert(!document.body.textContent?.includes(diagnostic.recommendation), "Identity conflict retained private content");
+  checks.push("identity change before a write blocks it and clears prior private content");
+
+  role = "client"; records = [published]; mount();
+  await wait(() => document.body.textContent?.includes("Seu diagnóstico publicado"), "Reload publication missing");
+  deniedRead = true; await click("Atualizar");
+  await wait(() => document.querySelector('[role="alert"]'), "Denied access missing");
+  assert(!document.body.textContent?.includes(diagnostic.recommendation), "Denied access retained private content");
+  assert(button("Nova necessidade")?.disabled, "Denied session permits mutation");
+  checks.push("denied refresh clears private content and blocks actions");
   window.__uiResult = { status: "passed", checks };
 }
 window.__uiResult = { status: "running", checks };
