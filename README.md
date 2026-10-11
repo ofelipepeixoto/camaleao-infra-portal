@@ -2,7 +2,7 @@
 
 **Agência Camaleão · projeto de Carlos Felipe**
 
-Portal planejado para transformar necessidades de infraestrutura de IA em diagnóstico guiado, plano revisado, implantação contratada e operação acompanhada. Marca: [Agência Camaleão](https://camaleaoweb3.com.br/).
+Portal em homologação para transformar necessidades de infraestrutura de IA em diagnóstico guiado, plano revisado, implantação contratada e operação acompanhada. Marca: [Agência Camaleão](https://camaleaoweb3.com.br/).
 
 ## Comece por aqui
 
@@ -16,19 +16,20 @@ Portal planejado para transformar necessidades de infraestrutura de IA em diagn�
 - [Fontes e limites](docs/FONTES-E-LIMITES.md)
 - [Verificação realizada](docs/VERIFICACAO.md)
 
-## O que existe nesta versão
+## Primeira entrega funcional
 
-Plano completo e uma **referência offline experimental**, sem dependências externas:
+A aplicação em `apps/site` usa Sites/Vinext, login ChatGPT e banco D1. A jornada conecta cadastro de necessidade, diagnóstico inicial por critérios, revisão humana e publicação da versão aprovada. Cada pessoa trabalha em seu espaço individual; times empresariais entram em uma próxima entrega.
 
-- Demonstração visual guiada em `apps/portal/index.html`; abrir esse arquivo no navegador após baixar/clonar o projeto.
-- Validação de intake e recomendações determinísticas.
-- Exemplos em memória de isolamento, reserva de orçamento e aprovação vinculada à ação.
-- Subconjunto MCP stdio para catálogo público e diagnóstico offline.
-- Prompt Camaleão, schemas e gerador local de requisição de exemplo OpenAI Responses.
-- Especificações n8n não importáveis, sem credenciais ou workflow ativo.
-- Testes e CI que não chamam APIs nem serviços de clientes.
+- Autorização no servidor em todas as operações e isolamento por identidade.
+- Diagnósticos e revisões persistidos, com hash calculado no servidor.
+- Revisor definido por `CAMALEAO_REVIEWER_SUBJECT` em configuração segura do servidor, sem promoção por formulário.
+- Publicação condicionada à versão e ao conteúdo da aprovação.
+- API OpenAI desativada nesta entrega; não há envio a provedores de IA nem consumo pago.
+- Subdomínio reservado como objetivo: `infra.camaleaoweb3.com.br`. A configuração DNS usa somente os valores reais retornados pelo Sites.
 
-Esta versão não é um portal autenticado ou hospedado. Não contém banco, persistência, pagamento, integração real de API, provisionamento, envio WhatsApp ou medição de custo real. A demonstração visual e o núcleo Python são referências separadas; a conexão entre interface/backend entra na próxima fatia funcional.
+Veja [Entrega 01](docs/ENTREGA-01.md), [subdomínio e HostGator](docs/SUBDOMINIO.md) e [verificação](docs/VERIFICACAO.md) para o estado observado da implantação.
+
+O laboratório offline original permanece separado: `apps/portal/index.html`, núcleo Python, MCP stdio experimental e gerador local de requisição OpenAI. Os blueprints n8n não são workflows ativos. WhatsApp, provisionamento de infraestrutura, pagamento e MCP remoto continuam pendentes.
 
 ## Reproduzir
 
@@ -56,9 +57,17 @@ python3 scripts/build_openai_request.py --model APPROVED_MODEL_PLACEHOLDER
 
 O argumento é um identificador ilustrativo; escolher modelo disponível e avaliado antes do uso real. O script **só imprime JSON** e não lê uma chave nem faz uma chamada.
 
-## Próxima fatia funcional
+## Verificar a aplicação persistente
 
-Confirmar oferta, responsável, ambiente, login de clientes e teto de custo. Inventariar recursos por acesso seguro. Implementar um intake persistido com membresia, diagnóstico, revisão humana e publicação da mesma versão, integrando uma chamada OpenAI autorizada e registrando consumo. Os gates constam do backlog e do plano de segurança.
+Node 24+ para os testes com SQLite local; a aplicação hospedada usa D1. Os testes não chamam APIs externas.
+
+```bash
+node --test apps/site/tests/*.test.mjs
+```
+
+Para desenvolver a interface, usar a configuração e o lockfile em `apps/site`. A publicação é feita pelo fluxo nativo do Sites, que aplica as migrações de `apps/site/drizzle` e preserva o ID em `.openai/hosting.json`. Valores de ambiente e credenciais nunca entram no repositório.
+
+A API OpenAI permanece desativada nesta entrega. Sua ativação futura exige uma chave de projeto configurada diretamente nos segredos do servidor e controles persistentes de consumo. Configurar somente a chave não habilita a integração atual; o plugin OpenAI Developers foi dispensado pelo usuário.
 
 ## Autoria e direitos
 

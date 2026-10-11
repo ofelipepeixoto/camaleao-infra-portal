@@ -1,0 +1,476 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "c09c000f-b9a1-4ef4-aa43-28078e9de3db",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "tables": {
+    "portal_approvals": {
+      "name": "portal_approvals",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "intake_id": {
+          "name": "intake_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "hash": {
+          "name": "hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reviewer_subject": {
+          "name": "reviewer_subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "approved_at": {
+          "name": "approved_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "approval_version": {
+          "name": "approval_version",
+          "columns": [
+            "intake_id",
+            "version"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "portal_approvals_intake_id_portal_intakes_id_fk": {
+          "name": "portal_approvals_intake_id_portal_intakes_id_fk",
+          "tableFrom": "portal_approvals",
+          "tableTo": "portal_intakes",
+          "columnsFrom": [
+            "intake_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "portal_approvals_reviewer_subject_portal_memberships_subject_fk": {
+          "name": "portal_approvals_reviewer_subject_portal_memberships_subject_fk",
+          "tableFrom": "portal_approvals",
+          "tableTo": "portal_memberships",
+          "columnsFrom": [
+            "reviewer_subject"
+          ],
+          "columnsTo": [
+            "subject"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "portal_audit": {
+      "name": "portal_audit",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "intake_id": {
+          "name": "intake_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "actor_subject": {
+          "name": "actor_subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "event": {
+          "name": "event",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "hash": {
+          "name": "hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "audit_intake": {
+          "name": "audit_intake",
+          "columns": [
+            "intake_id",
+            "created_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "portal_audit_intake_id_portal_intakes_id_fk": {
+          "name": "portal_audit_intake_id_portal_intakes_id_fk",
+          "tableFrom": "portal_audit",
+          "tableTo": "portal_intakes",
+          "columnsFrom": [
+            "intake_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "portal_audit_actor_subject_portal_memberships_subject_fk": {
+          "name": "portal_audit_actor_subject_portal_memberships_subject_fk",
+          "tableFrom": "portal_audit",
+          "tableTo": "portal_memberships",
+          "columnsFrom": [
+            "actor_subject"
+          ],
+          "columnsTo": [
+            "subject"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "portal_intakes": {
+      "name": "portal_intakes",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_subject": {
+          "name": "owner_subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "intake_json": {
+          "name": "intake_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stage": {
+          "name": "stage",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'submitted'"
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "hash": {
+          "name": "hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "published_version": {
+          "name": "published_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "published_hash": {
+          "name": "published_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "operation_token": {
+          "name": "operation_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "intakes_tenant": {
+          "name": "intakes_tenant",
+          "columns": [
+            "tenant_id",
+            "updated_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "portal_intakes_owner_subject_portal_memberships_subject_fk": {
+          "name": "portal_intakes_owner_subject_portal_memberships_subject_fk",
+          "tableFrom": "portal_intakes",
+          "tableTo": "portal_memberships",
+          "columnsFrom": [
+            "owner_subject"
+          ],
+          "columnsTo": [
+            "subject"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "intake_stage": {
+          "name": "intake_stage",
+          "value": "\"portal_intakes\".\"stage\" IN ('submitted', 'draft', 'reviewed', 'published')"
+        },
+        "intake_version": {
+          "name": "intake_version",
+          "value": "\"portal_intakes\".\"version\" >= 0"
+        }
+      }
+    },
+    "portal_memberships": {
+      "name": "portal_memberships",
+      "columns": {
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "active": {
+          "name": "active",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "membership_active": {
+          "name": "membership_active",
+          "value": "\"portal_memberships\".\"active\" IN (0, 1)"
+        }
+      }
+    },
+    "portal_revisions": {
+      "name": "portal_revisions",
+      "columns": {
+        "intake_id": {
+          "name": "intake_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "hash": {
+          "name": "hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "diagnostic_json": {
+          "name": "diagnostic_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "actor_subject": {
+          "name": "actor_subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "portal_revisions_intake_id_portal_intakes_id_fk": {
+          "name": "portal_revisions_intake_id_portal_intakes_id_fk",
+          "tableFrom": "portal_revisions",
+          "tableTo": "portal_intakes",
+          "columnsFrom": [
+            "intake_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "portal_revisions_actor_subject_portal_memberships_subject_fk": {
+          "name": "portal_revisions_actor_subject_portal_memberships_subject_fk",
+          "tableFrom": "portal_revisions",
+          "tableTo": "portal_memberships",
+          "columnsFrom": [
+            "actor_subject"
+          ],
+          "columnsTo": [
+            "subject"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "portal_revisions_intake_id_version_pk": {
+          "columns": [
+            "intake_id",
+            "version"
+          ],
+          "name": "portal_revisions_intake_id_version_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "revision_source": {
+          "name": "revision_source",
+          "value": "\"portal_revisions\".\"source\" IN ('deterministic', 'human_review')"
+        },
+        "revision_version": {
+          "name": "revision_version",
+          "value": "\"portal_revisions\".\"version\" > 0"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

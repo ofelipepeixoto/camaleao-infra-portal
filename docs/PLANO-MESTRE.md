@@ -1,5 +1,7 @@
 # Camaleão Infra Portal — plano mestre
 
+> Estado da implementação: veja [Entrega 01](ENTREGA-01.md) e [subdomínio](SUBDOMINIO.md). A primeira fatia usa Sites/Vinext e D1; Python/PostgreSQL permanece como expansão prevista.
+
 Data: 11/10/2026 · Responsável de produto: Carlos Felipe / Agência Camaleão.
 
 ## 1. Decisão executiva

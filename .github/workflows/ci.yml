@@ -1,4 +1,4 @@
-name: Offline reference checks
+name: Camaleão portal checks
 on:
   push:
   pull_request:
@@ -14,3 +14,13 @@ jobs:
         run: python3 -m unittest discover -s tests -v
       - name: Run deterministic demonstration
         run: python3 scripts/demo.py
+  portal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Test persistent workflow and HTTP access boundary
+        run: node --test apps/site/tests/*.test.mjs
