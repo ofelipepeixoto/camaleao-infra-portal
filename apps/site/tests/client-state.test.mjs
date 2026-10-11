@@ -72,3 +72,18 @@ test('timeout stops waiting without claiming remote cancellation', async () => {
     return true;
   });
 });
+
+
+test('identity changes and publication revocation invalidate confirmation context', () => {
+  assert.notEqual(reviewIdentity(draft, 'client', 'a'), reviewIdentity(draft, 'client', 'b'));
+  assert.notEqual(reviewIdentity(draft, 'reviewer'), reviewIdentity({ ...draft, publication_revoked: true }, 'reviewer'));
+});
+test('session precondition failure carries server code and requires clearing private UI state', async () => {
+  const { accessWasLost } = await import('../lib/portal-client-state.mjs');
+  for (const status of [401, 403, 404]) assert.equal(accessWasLost(new PortalRequestError('denied', status)), true);
+  for (const status of [409, 503]) assert.equal(accessWasLost(new PortalRequestError('other', status)), false);
+  await assert.rejects(requestPortal(async () => Response.json({ error: 'Changed account', code: 'session_changed' }, { status: 409 })), error => {
+    assert.equal(accessWasLost(error), true); assert.equal(recoveryFor(error).uncertain, false);
+    assert.match(recoveryFor(error).message, /conta mudou/); return true;
+  });
+});

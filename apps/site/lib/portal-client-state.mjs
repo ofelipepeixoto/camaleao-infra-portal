@@ -1,20 +1,29 @@
 // Presentation and request recovery only. Authorization stays in portal-service.mjs.
-export function reviewIdentity(item, role) {
-  return JSON.stringify([role, item.id, item.version, item.status,
+export function reviewIdentity(item, role, subject = "") {
+  return JSON.stringify([subject, role, item.id, item.version, item.status,
     item.draft?.version ?? null, item.draft?.hash ?? null,
-    item.published?.version ?? null, item.published?.hash ?? null]);
+    item.published?.version ?? null, item.published?.hash ?? null, item.publication_revoked === true]);
 }
 
 export class PortalRequestError extends Error {
-  constructor(message, status = null) {
+  constructor(message, status = null, code = null) {
     super(message);
     this.name = "PortalRequestError";
     this.status = status;
+    this.code = code;
   }
+}
+
+export function accessWasLost(error) {
+  return error instanceof PortalRequestError && ([401, 403, 404].includes(error.status) || error.code === "session_changed");
 }
 
 export function recoveryFor(error, mutation = false, confirmed = false) {
   const status = error instanceof PortalRequestError ? error.status : null;
+  if (error instanceof PortalRequestError && error.code === "session_changed") return {
+    message: "A conta mudou. O conteúdo anterior foi removido desta tela. Atualize o portal e confirme novamente.",
+    action: "refresh", uncertain: false,
+  };
   if (confirmed && status === 401) return {
     message: "A etapa foi registrada, mas sua sessão expirou ao atualizar. Entre em outra aba e confira o estado salvo antes de continuar.",
     action: "signin", uncertain: false,
@@ -24,7 +33,7 @@ export function recoveryFor(error, mutation = false, confirmed = false) {
     action: "refresh", uncertain: false,
   };
   if (status === 401) return {
-    message: "Sua sessão expirou. Entre em outra aba e volte para atualizar este espaço. Suas respostas continuam nesta tela.",
+    message: "Sua sessão expirou. O conteúdo anterior foi removido desta tela. Entre em outra aba e volte para atualizar este espaço.",
     action: "signin", uncertain: false,
   };
   if (status === 403 || status === 404) return {
@@ -55,7 +64,7 @@ export async function requestPortal(fetcher, init = {}, timeoutMs = 15000) {
     let body;
     try { body = await response.json(); }
     catch { throw new PortalRequestError("A resposta do portal não pôde ser lida.", response.status); }
-    if (!response.ok) throw new PortalRequestError(typeof body?.error === "string" ? body.error : "Não foi possível concluir esta etapa.", response.status);
+    if (!response.ok) throw new PortalRequestError(typeof body?.error === "string" ? body.error : "Não foi possível concluir esta etapa.", response.status, typeof body?.code === "string" ? body.code : null);
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new PortalRequestError("A resposta do portal não pôde ser lida.", response.status);
     return body;
   } catch (error) {

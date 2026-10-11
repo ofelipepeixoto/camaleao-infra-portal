@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { PortalRequestError, recoveryFor, requestPortal, reviewIdentity, type Recovery } from "../lib/portal-client-state.mjs";
+import { PortalRequestError, accessWasLost, recoveryFor, requestPortal, reviewIdentity, type Recovery } from "../lib/portal-client-state.mjs";
 import { ArrowRight, ArrowUpRight, Check, ChevronLeft, FileText, Layers, LoaderCircle, LogOut, MessagesSquare, Plus, RefreshCw, ShieldCheck, Workflow } from "lucide-react";
 
 type User = { userId: string; displayName: string };
@@ -11,7 +11,7 @@ type Stage = "intake" | "draft" | "reviewed" | "published";
 type Intake = { goal: "documents" | "process" | "support"; existing_tools: string[]; users: number; sensitivity: "normal" | "restricted"; external_processing_allowed: boolean; monthly_budget_brl: number | null };
 type Diagnostic = { status: "draft"; goal_summary: string; recommendation: string; alternatives: string[]; missing_information: string[]; evidence_refs: string[]; cost_status: "unverified"; human_review: true };
 type Version = { version: number; hash: string; content: Record<string, unknown> };
-type Case = { id: string; status: Stage; version: number; hash: string | null; created_at?: string; updated_at?: string; intake: Intake; draft?: Version | null; published?: Version | null };
+type Case = { id: string; status: Stage; publication_revoked?: boolean; version: number; hash: string | null; created_at?: string; updated_at?: string; intake: Intake; draft?: Version | null; published?: Version | null };
 type PortalData = { user: User; role: Role; cases: Case[]; apiConfigured: boolean };
 type View = "overview" | "new";
 
@@ -74,6 +74,7 @@ export default function PortalClient({ initialUser }: { initialUser: User }) {
   const [reviewDirty, setReviewDirty] = useState(false);
   const requestLock = useRef(false);
   const errorHeading = useRef<HTMLDivElement>(null);
+  const currentPortal = useRef<PortalData | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => { if (error) errorHeading.current?.focus(); }, [error]);
@@ -95,6 +96,16 @@ export default function PortalClient({ initialUser }: { initialUser: User }) {
     setReviewDirty(false); setSelectedId(id); setNotice("");
   };
 
+  const clearPrivateState = useCallback(() => {
+    currentPortal.current = null; setData(null); setSelectedId(null);
+    setHasIntakeDraft(false); setDraftEpoch(value => value + 1); setReviewDirty(false);
+    setView("overview"); setNotice("");
+  }, []);
+  const acceptPortal = useCallback((portal: PortalData) => {
+    const previous = currentPortal.current;
+    if (previous && (previous.user.userId !== portal.user.userId || previous.role !== portal.role)) clearPrivateState();
+    currentPortal.current = portal; setData(portal);
+  }, [clearPrivateState]);
   const load = useCallback(async () => {
     const body = await requestPortal(fetch);
     const portal = portalBody(body);
@@ -103,17 +114,18 @@ export default function PortalClient({ initialUser }: { initialUser: User }) {
 
   useEffect(() => {
     let mounted = true;
-    load().then((portal) => { if (mounted) setData(portal); }).catch((reason) => { if (mounted) { const feedback = recoveryFor(reason); setRecovery(feedback); setError(feedback.message); } }).finally(() => { if (mounted) setLoading(false); });
+    load().then((portal) => { if (mounted) acceptPortal(portal); }).catch((reason) => { if (mounted) { if (accessWasLost(reason)) clearPrivateState(); const feedback = recoveryFor(reason); setRecovery(feedback); setError(feedback.message); } }).finally(() => { if (mounted) setLoading(false); });
     return () => { mounted = false; };
-  }, [load]);
+  }, [load, acceptPortal, clearPrivateState]);
 
   const act = async (action: string, payload: Record<string, unknown>) => {
     if (requestLock.current || loading || recovery?.action || !data) return false;
+    if (action === "revoke" && !discardReview()) return false;
     requestLock.current = true;
     setBusy(action); setError(""); setNotice(""); setRecovery(null);
     let confirmed = false;
     try {
-      const body = await requestPortal(fetch, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, ...payload }) });
+      const body = await requestPortal(fetch, { method: "POST", headers: { "Content-Type": "application/json", "X-Portal-Subject": data.user.userId }, body: JSON.stringify({ action, ...payload }) });
       const saved = body.case as Case | undefined;
       if (!saved || typeof saved.id !== "string" || !Number.isInteger(saved.version) || !stages.includes(saved.status) || !saved.intake || !goals[saved.intake.goal]) {
         throw new PortalRequestError("A confirmação recebida não contém um pedido válido.", 200);
@@ -128,10 +140,11 @@ export default function PortalClient({ initialUser }: { initialUser: User }) {
       if (action === "create") {
         setHasIntakeDraft(false); setDraftEpoch(value => value + 1); setView("overview");
       }
-      setNotice(({ create: "Sua necessidade foi registrada.", generate: "Diagnóstico inicial preparado para revisão.", review: "Versão revisada e aprovada. Confira a nova versão antes de publicar.", publish: "A versão aprovada foi publicada para o cliente." } as Record<string, string>)[action] ?? "Etapa concluída.");
-      setData(await load());
+      setNotice(({ create: "Sua necessidade foi registrada.", generate: "Diagnóstico inicial preparado para revisão.", review: "Versão revisada e aprovada. Confira a nova versão antes de publicar.", publish: "A versão aprovada foi publicada para o cliente.", revoke: "A publicação foi revogada. O histórico permanece preservado." } as Record<string, string>)[action] ?? "Etapa concluída.");
+      acceptPortal(await load());
       return true;
     } catch (reason) {
+      if (accessWasLost(reason)) clearPrivateState();
       const feedback = recoveryFor(reason, true, confirmed);
       setRecovery(feedback); setError(feedback.message);
       return confirmed;
@@ -144,9 +157,9 @@ export default function PortalClient({ initialUser }: { initialUser: User }) {
       const fresh = await load();
       const before = data?.cases.find(item => item.id === selectedId) ?? data?.cases[0];
       const after = fresh.cases.find(item => item.id === selectedId) ?? fresh.cases[0];
-      if (!before || !after || reviewIdentity(before, data?.role ?? "client") !== reviewIdentity(after, fresh.role)) setReviewDirty(false);
-      setData(fresh); setRecovery(null); setNotice("Lista atualizada. Confira a versão e o status antes de continuar.");
-    } catch (reason) { const feedback = recoveryFor(reason); setRecovery(feedback); setError(feedback.message); }
+      if (!before || !after || reviewIdentity(before, data?.role ?? "client", data?.user.userId) !== reviewIdentity(after, fresh.role, fresh.user.userId)) setReviewDirty(false);
+      acceptPortal(fresh); setRecovery(null); setNotice("Lista atualizada. Confira a versão e o status antes de continuar.");
+    } catch (reason) { if (accessWasLost(reason)) clearPrivateState(); const feedback = recoveryFor(reason); setRecovery(feedback); setError(feedback.message); }
     finally { requestLock.current = false; setLoading(false); }
   };
 
@@ -175,14 +188,14 @@ export default function PortalClient({ initialUser }: { initialUser: User }) {
         </aside>
         <main id="portal-content" tabIndex={-1} className="workspace" aria-busy={loading || busy !== null}>
           <div className="workspace-top"><span className="eyebrow">CAMALEÃO / {role === "reviewer" ? "REVISÃO" : "INFRAESTRUTURA DE IA"}</span><span className="pilot-badge"><span className="status-dot" /> Portal piloto</span></div>
-          {error && <div className="recovery-block"><div ref={errorHeading} className="feedback error" role="alert" tabIndex={-1}>{error}</div>{recovery?.action && <div className="recovery-actions">{recovery.action === "signin" && <a className="button" href="/signin-with-chatgpt?return_to=%2F" target="_blank" rel="noopener noreferrer">Entrar em outra aba</a>}<button className="button" disabled={loading || busy !== null} onClick={refresh}>Conferir estado salvo</button><p>O formulário permanece nesta aba. Uma atualização pode trazer uma versão mais recente; confira o conteúdo antes de confirmar.</p></div>}</div>}
+          {error && <div className="recovery-block"><div ref={errorHeading} className="feedback error" role="alert" tabIndex={-1}>{error}</div>{recovery?.action && <div className="recovery-actions">{recovery.action === "signin" && <a className="button" href="/signin-with-chatgpt?return_to=%2F" target="_blank" rel="noopener noreferrer">Entrar em outra aba</a>}<button className="button" disabled={loading || busy !== null} onClick={refresh}>Conferir estado salvo</button><p>Uma atualização pode trazer outra conta, permissão ou versão. Confira o conteúdo antes de confirmar.</p></div>}</div>}
           {notice && <div className="feedback success" role="status"><Check size={18} />{notice}</div>}
           <div hidden={view !== "new"}><IntakeWizard key={`${user.userId}-${draftEpoch}`} active={view === "new"} busy={actionsBlocked} onCancel={() => setView("overview")} onSubmit={(intake, key) => act("create", { intake, idempotency_key: key })} /></div>
           {view === "overview" && <>
             <div className="page-heading"><div><h1 ref={heading} tabIndex={-1}>{role === "reviewer" ? "Cada plano, uma decisão consciente." : "Da necessidade ao próximo passo."}</h1><p>{role === "reviewer" ? "Revise o diagnóstico e publique a versão aprovada para o cliente." : "Acompanhe seu diagnóstico e avance com a Camaleão."}</p></div><button className="button primary" onClick={openWizard} disabled={actionsBlocked}><Plus size={17} /> {hasIntakeDraft ? "Retomar necessidade" : "Nova necessidade"}</button></div>
             <div className="stats-grid"><div className="stat-card"><span>Pedidos registrados</span><strong>{data ? cases.length.toString().padStart(2, "0") : "—"}</strong><Layers size={20} /></div><div className="stat-card"><span>Na etapa de revisão</span><strong>{data ? reviewingCount.toString().padStart(2, "0") : "—"}</strong><ShieldCheck size={20} /></div><div className="stat-card"><span>Diagnósticos publicados</span><strong>{data ? publishedCount.toString().padStart(2, "0") : "—"}</strong><FileText size={20} /></div></div>
             <div className="section-heading"><h2>{role === "reviewer" ? "Fila de diagnósticos" : "Sua jornada com a Camaleão"}</h2><button className="quiet-button" onClick={refresh} disabled={loading || busy !== null}><RefreshCw size={14} className={loading ? "spin" : ""} /> Atualizar</button></div>
-            {loading && !data ? <div className="empty-state" role="status"><LoaderCircle className="spin" size={24} /><h3>Carregando seu espaço</h3><p>Buscando seus pedidos e as últimas versões.</p></div> : !data ? <div className="empty-state"><h2>Seu espaço ainda não foi carregado.</h2><p>Use “Conferir estado salvo” para recuperar seus pedidos antes de registrar uma nova necessidade.</p></div> : cases.length === 0 ? <div className="empty-state"><span className="empty-icon"><Workflow size={28} /></span><span className="eyebrow">COMECE COM O QUE VOCÊ PRECISA</span><h2>Sua primeira solução começa<br />com uma boa pergunta.</h2><p>Você não precisa escolher a tecnologia agora. Conte a necessidade, e nós organizamos os próximos passos.</p><button className="button primary" disabled={actionsBlocked} onClick={openWizard}>Iniciar meu diagnóstico <ArrowRight size={17} /></button></div> : <div className="cases-layout"><div className="case-list" aria-label="Pedidos">{cases.map((item) => { const GoalIcon = goals[item.intake.goal]?.Icon ?? FileText; return <button key={item.id} className={`case-card ${selected?.id === item.id ? "selected" : ""}`} disabled={busy !== null || loading} aria-pressed={selected?.id === item.id} onClick={() => selectCase(item.id)}><span className="case-card-icon"><GoalIcon size={20} /></span><span className="case-card-copy"><strong>{goals[item.intake.goal]?.short ?? "Diagnóstico"}</strong><small>Pedido {item.id.slice(0, 8)} · {dateLabel(item.created_at)}</small><span className={`status-tag stage-${item.status}`}>{shortLabels[item.status]}</span></span><ArrowUpRight size={15} /></button>; })}</div>{selected && <CaseDetail key={reviewIdentity(selected, role)} item={selected} role={role} busy={actionsBlocked ? (busy ?? "sync") : null} onDirty={() => setReviewDirty(true)} apiConfigured={data?.apiConfigured ?? false} onAction={act} />}</div>}
+            {loading && !data ? <div className="empty-state" role="status"><LoaderCircle className="spin" size={24} /><h3>Carregando seu espaço</h3><p>Buscando seus pedidos e as últimas versões.</p></div> : !data ? <div className="empty-state"><h2>Seu espaço ainda não foi carregado.</h2><p>Use “Conferir estado salvo” para recuperar seus pedidos antes de registrar uma nova necessidade.</p></div> : cases.length === 0 ? <div className="empty-state"><span className="empty-icon"><Workflow size={28} /></span><span className="eyebrow">COMECE COM O QUE VOCÊ PRECISA</span><h2>Sua primeira solução começa<br />com uma boa pergunta.</h2><p>Você não precisa escolher a tecnologia agora. Conte a necessidade, e nós organizamos os próximos passos.</p><button className="button primary" disabled={actionsBlocked} onClick={openWizard}>Iniciar meu diagnóstico <ArrowRight size={17} /></button></div> : <div className="cases-layout"><div className="case-list" aria-label="Pedidos">{cases.map((item) => { const GoalIcon = goals[item.intake.goal]?.Icon ?? FileText; return <button key={item.id} className={`case-card ${selected?.id === item.id ? "selected" : ""}`} disabled={busy !== null || loading} aria-pressed={selected?.id === item.id} onClick={() => selectCase(item.id)}><span className="case-card-icon"><GoalIcon size={20} /></span><span className="case-card-copy"><strong>{goals[item.intake.goal]?.short ?? "Diagnóstico"}</strong><small>Pedido {item.id.slice(0, 8)} · {dateLabel(item.created_at)}</small><span className={`status-tag stage-${item.status}`}>{shortLabels[item.status]}</span></span><ArrowUpRight size={15} /></button>; })}</div>{selected && <CaseDetail key={reviewIdentity(selected, role, user.userId)} item={selected} role={role} busy={actionsBlocked ? (busy ?? "sync") : null} onDirty={() => setReviewDirty(true)} apiConfigured={data?.apiConfigured ?? false} onAction={act} />}</div>}
           </>}
           <footer className="workspace-footer"><span>Agência Camaleão</span><span>Necessidade → diagnóstico → revisão → publicação</span></footer>
         </main>
@@ -245,6 +258,7 @@ function CaseDetail({ item, role, busy, apiConfigured, onAction, onDirty }: { it
   const original = item.draft ? asDiagnostic(item.draft.content) : null;
   const [edited, setEdited] = useState<Diagnostic | null>(original);
   const [confirmed, setConfirmed] = useState(false);
+  const [revokeConfirmed, setRevokeConfirmed] = useState(false);
   const detailHeading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { detailHeading.current?.focus(); }, []);
   const version = role === "client" ? item.published ?? item.draft : item.status === "published" ? item.published ?? item.draft : item.draft;
@@ -253,7 +267,7 @@ function CaseDetail({ item, role, busy, apiConfigured, onAction, onDirty }: { it
   const reviewDiagnostic = edited ? { ...edited, goal_summary: edited.goal_summary.trim(), recommendation: edited.recommendation.trim(), alternatives: edited.alternatives.map((value) => value.trim()).filter(Boolean), missing_information: edited.missing_information.map((value) => value.trim()).filter(Boolean), evidence_refs: edited.evidence_refs.map((value) => value.trim()).filter(Boolean) } : null;
   const exactContent = role === "reviewer" && item.status === "draft" && reviewDiagnostic ? reviewDiagnostic : version?.content;
   return <article className="case-detail"><div className="detail-heading"><div><span className="eyebrow">PEDIDO {item.id.slice(0, 8)}</span><h2 ref={detailHeading} tabIndex={-1}>{goals[item.intake.goal]?.short ?? "Diagnóstico"}</h2></div><span className={`status-tag stage-${item.status}`}>{shortLabels[item.status]}</span></div><ol className="journey" aria-label="Etapas do pedido">{stages.map((stage, index) => <li key={stage} aria-current={index === stageIndex ? "step" : undefined} className={index < stageIndex ? "complete" : index === stageIndex ? "current" : ""}><span className="journey-marker">{index < stageIndex ? <Check size={12} /> : index + 1}</span><span>{labels[stage]}</span></li>)}</ol><div className="case-context"><span>{item.intake.users} {item.intake.users === 1 ? "pessoa" : "pessoas"}</span><span>{item.intake.sensitivity === "restricted" ? "Dados restritos" : "Dados comuns"}</span><span>{item.intake.monthly_budget_brl === null ? "Orçamento a definir" : `${new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(item.intake.monthly_budget_brl)}/mês de referência`}</span></div>
-    <p className="stage-guidance">{stageGuidance[role][item.status]}</p>
+    <p className="stage-guidance">{item.publication_revoked ? "A publicação anterior foi revogada. Uma nova versão precisa de revisão e publicação para ficar disponível." : stageGuidance[role][item.status]}</p>
     {item.status === "intake" && <div className="diagnostic-start"><div className="empty-icon small"><FileText size={24} /></div><h3>Necessidade recebida.</h3><p>Prepare o diagnóstico inicial para a Camaleão revisar o escopo e os próximos passos.</p><button className="button primary" disabled={busy !== null} onClick={() => onAction("generate", { case_id: item.id, version: item.version, confirm: true })}>{busy === "generate" ? <LoaderCircle className="spin" size={17} /> : <FileText size={17} />} Preparar diagnóstico</button></div>}
     {!apiConfigured && <p className="mode-note"><span className="status-dot" /> Diagnóstico inicial por critérios. Nenhum provedor externo de IA é usado nesta etapa.</p>}
     {version && <div className="diagnostic-content"><div className="content-heading"><h3>{item.status === "published" || (role === "client" && item.published) ? "Seu diagnóstico publicado" : role === "reviewer" ? "Conteúdo para revisão" : "Diagnóstico em preparação"}</h3><span>VERSÃO {version.version}</span></div>{role === "reviewer" && item.status === "draft" && edited ? <fieldset className="review-editor" disabled={busy !== null} aria-label="Editar diagnóstico"><label className="field-label">Necessidade resumida<textarea rows={2} value={edited.goal_summary} maxLength={2000} onChange={(event) => change("goal_summary", event.target.value)} /></label><label className="field-label">Recomendação<textarea rows={4} value={edited.recommendation} maxLength={8000} onChange={(event) => change("recommendation", event.target.value)} /></label>{([{ field: "alternatives", label: "Alternativas" }, { field: "missing_information", label: "Informações a confirmar" }, { field: "evidence_refs", label: "Referências utilizadas" }] as const).map(({ field, label }) => <label key={field} className="field-label">{label}<textarea rows={3} value={edited[field].join("\n")} maxLength={8000} onChange={(event) => change(field, event.target.value.split("\n"))} /><small>Um item por linha.</small></label>)}</fieldset> : <DiagnosticReadout content={version.content} />}
@@ -262,6 +276,7 @@ function CaseDetail({ item, role, busy, apiConfigured, onAction, onDirty }: { it
       {role === "reviewer" && item.status === "reviewed" && <div className="review-action"><label className="check-field"><input type="checkbox" disabled={busy !== null} checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><span>Conferi a versão {version.version} acima do pedido {item.id.slice(0, 8)} e quero disponibilizar este conteúdo ao cliente.</span></label><button className="button primary" disabled={busy !== null || !confirmed} onClick={() => onAction("publish", { case_id: item.id, version: version.version, hash: version.hash })}>{busy === "publish" ? <LoaderCircle size={17} className="spin" /> : <ArrowUpRight size={17} />} Publicar versão aprovada</button></div>}
       {item.status === "published" && <p className="published-note"><Check size={17} /> Versão {version.version} publicada. O conteúdo corresponde à revisão aprovada.</p>}
     </div>}
+    {role === "reviewer" && item.published && <section className="review-action revoke-action" aria-label="Revogar publicação"><h3>Retirar esta publicação do cliente</h3><p>Revogar a versão {item.published.version} do pedido {item.id.slice(0, 8)} remove seu conteúdo das próximas consultas do cliente e preserva o histórico. Isso não apaga cópias já lidas ou salvas.</p><p className="hash-line">Identificador da publicação: <code>{item.published.hash}</code></p><label className="check-field"><input type="checkbox" disabled={busy !== null} checked={revokeConfirmed} onChange={event => setRevokeConfirmed(event.target.checked)} /><span>Confirmo revogar apenas esta publicação da versão {item.published.version}.</span></label><button className="button" disabled={busy !== null || !revokeConfirmed} onClick={() => onAction("revoke", { case_id: item.id, version: item.published!.version, hash: item.published!.hash })}>{busy === "revoke" ? <LoaderCircle size={17} className="spin" /> : null}Revogar publicação</button></section>}
     {role === "client" && item.status !== "published" && <p className="review-pending"><ShieldCheck size={17} /> {item.published ? "Uma nova revisão está em preparação. O diagnóstico publicado acima continua disponível." : "A versão final estará disponível após a revisão e a publicação pela Camaleão."}</p>}
     {role === "reviewer" && item.published && item.status !== "published" && <details className="previous-publication"><summary>Diagnóstico já publicado · versão {item.published.version}</summary><DiagnosticReadout content={item.published.content} /><p className="hash-line">Identificador da publicação: <code>{item.published.hash}</code></p></details>}
   </article>;

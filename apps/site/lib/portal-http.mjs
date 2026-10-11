@@ -36,6 +36,7 @@ function asCase(record) {
     published: record.published_diagnostic ? {version:record.published_version,hash:record.published_hash,content:record.published_diagnostic} :
       (record.stage === "published" && record.diagnostic ? {version:record.version,hash:record.hash,content:record.diagnostic} : null),
     approval:record.approval,
+    publication_revoked:record.publication_revoked === true,
   };
 }
 
@@ -58,6 +59,10 @@ export async function portalHttp(request, {user, db, reviewerSubject, service}) 
       return json({error:"Use o portal para enviar esta solicitação.",code:"invalid_origin"},403);
     if (request.headers.get("Content-Type")?.split(";")[0].trim().toLowerCase() !== "application/json")
       return json({error:"Envie os dados em JSON."},415);
+    // A session switched in another tab must not execute a confirmation made
+    // under the previous identity. This is a precondition, never authentication.
+    if (request.headers.get("X-Portal-Subject") !== user.userId)
+      return json({error:"A conta mudou. Atualize o portal e confirme novamente.",code:"session_changed"},409);
     const body = await boundedJson(request);
     if (!body || typeof body !== "object" || Array.isArray(body)) return json({error:"Solicitação inválida."},400);
     let args;
@@ -73,6 +78,7 @@ export async function portalHttp(request, {user, db, reviewerSubject, service}) 
         if (!exact(["action","case_id","version","hash","diagnostic"])) return json({error:"Campos não permitidos."},400);
         args={id:body.case_id,expected_version:body.version,expected_hash:body.hash,diagnostic:body.diagnostic}; break;
       case "publish":
+      case "revoke":
         if (!exact(["action","case_id","version","hash"])) return json({error:"Campos não permitidos."},400);
         args={id:body.case_id,version:body.version,hash:body.hash}; break;
       default: return json({error:"Ação não disponível."},400);

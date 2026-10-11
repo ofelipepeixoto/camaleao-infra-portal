@@ -78,7 +78,8 @@ async function batch(db, statements) {
   return results;
 }
 const recordSelect = `SELECT i.*, r.diagnostic_json AS current_diagnostic_json, r.source AS current_source,
-  p.diagnostic_json AS published_diagnostic_json, a.version AS approval_version, a.hash AS approval_hash, a.approved_at
+  p.diagnostic_json AS published_diagnostic_json, a.version AS approval_version, a.hash AS approval_hash, a.approved_at,
+  (SELECT MAX(x.version) FROM portal_audit x WHERE x.intake_id = i.id AND x.event = 'diagnostic_revoked') AS revoked_version
   FROM portal_intakes i
   LEFT JOIN portal_revisions r ON r.intake_id = i.id AND r.version = i.version AND r.hash = i.hash
   LEFT JOIN portal_revisions p ON p.intake_id = i.id AND p.version = i.published_version AND p.hash = i.published_hash
@@ -86,10 +87,11 @@ const recordSelect = `SELECT i.*, r.diagnostic_json AS current_diagnostic_json, 
 function recordFromRow(row, reviewer) {
   const approval = row.approval_version ? { version: row.approval_version, hash: row.approval_hash, approved_at: row.approved_at } : null;
   // A human revision remains internal until its exact approved hash is published.
-  const visible = reviewer || row.current_source === 'deterministic' || row.published_version === row.version;
+  const visible = reviewer || row.current_source === 'deterministic' || (row.published_version === row.version && row.published_hash === row.hash);
   return { id: row.id, stage: row.stage, version: row.version, hash: row.hash, intake: JSON.parse(row.intake_json),
     diagnostic: visible && row.current_diagnostic_json ? JSON.parse(row.current_diagnostic_json) : null, approval,
     published_version: row.published_version, published_hash: row.published_hash,
+    publication_revoked: row.published_version === null && row.revoked_version !== null,
     published_diagnostic: row.published_diagnostic_json ? JSON.parse(row.published_diagnostic_json) : null, created_at: row.created_at, updated_at: row.updated_at };
 }
 async function load(db, subject, reviewer, id) {
@@ -144,13 +146,27 @@ export async function handlePortal({ db, subject, reviewerSubject, operation, bo
     return { record };
   }
   if (operation === 'read') { exact(body, ['id']); return { record: await load(db, subject, reviewer, idValue(body.id)) }; }
-  if (!['generate', 'review', 'publish'].includes(operation)) fail(404, 'unknown_operation', 'Operação indisponível.');
-  if (operation === 'review' || operation === 'publish') {
+  if (!['generate', 'review', 'publish', 'revoke'].includes(operation)) fail(404, 'unknown_operation', 'Operação indisponível.');
+  if (operation === 'review' || operation === 'publish' || operation === 'revoke') {
     if (!reviewer) fail(403, 'reviewer_required', 'Esta operação exige um revisor da Camaleão.');
   }
   exact(body, operation === 'generate' ? ['id', 'expected_version', 'confirm'] : operation === 'review' ? ['id', 'expected_version', 'expected_hash', 'diagnostic'] : ['id', 'version', 'hash']);
   const id = idValue(body.id), current = await load(db, subject, reviewer, id), token = crypto.randomUUID();
   if (operation === 'generate' && body.confirm !== true) fail(400, 'confirmation_required', 'Confirme a preparação do diagnóstico.');
+  if (operation === 'revoke') {
+    const version = integer(body.version, 1), hash = hashValue(body.hash);
+    if (current.published_version !== version || current.published_hash !== hash)
+      fail(409, 'version_conflict', 'A publicação mudou. Confira a versão disponível antes de revogar.');
+    const results = await batch(db, [
+      stmt(db, `UPDATE portal_intakes SET published_version = NULL, published_hash = NULL,
+        stage = CASE WHEN stage = 'published' THEN 'draft' ELSE stage END, operation_token = ?, updated_at = ?
+        WHERE id = ? AND published_version = ? AND published_hash = ? AND ${access('')}`,
+        [token, now, id, version, hash, ...accessValues(subject, reviewer)]),
+      auditStatement(db, { id, subject, token, event: 'diagnostic_revoked', version, hash, now }),
+    ]);
+    if (results[0].meta.changes !== 1) fail(409, 'version_conflict', 'A publicação ou a permissão mudou. Atualize o diagnóstico.');
+    return { record: await load(db, subject, reviewer, id) };
+  }
   if (operation === 'publish') {
     const version = integer(body.version, 1), hash = hashValue(body.hash);
     if (current.stage !== 'reviewed' || current.version !== version || current.hash !== hash || current.approval?.hash !== hash)
@@ -159,8 +175,9 @@ export async function handlePortal({ db, subject, reviewerSubject, operation, bo
       stmt(db, `UPDATE portal_intakes SET stage = 'published', published_version = ?, published_hash = ?, operation_token = ?, updated_at = ?
         WHERE id = ? AND stage = 'reviewed' AND version = ? AND hash = ? AND ${access('')}
         AND EXISTS (SELECT 1 FROM portal_approvals a WHERE a.intake_id = portal_intakes.id AND a.version = ? AND a.hash = ? AND a.reviewer_subject = ?)
+        AND NOT EXISTS (SELECT 1 FROM portal_audit x WHERE x.intake_id = portal_intakes.id AND x.event = 'diagnostic_revoked' AND x.version = ? AND x.hash = ?)
         AND EXISTS (SELECT 1 FROM portal_revisions r WHERE r.intake_id = portal_intakes.id AND r.version = ? AND r.hash = ?)`,
-        [version, hash, token, now, id, version, hash, ...accessValues(subject, reviewer), version, hash, subject, version, hash]),
+        [version, hash, token, now, id, version, hash, ...accessValues(subject, reviewer), version, hash, subject, version, hash, version, hash]),
       auditStatement(db, { id, subject, token, event: 'diagnostic_published', version, hash, now }),
     ]);
     if (results[0].meta.changes !== 1) fail(409, 'version_conflict', 'A versão ou a permissão mudou. Atualize o diagnóstico.');
