@@ -8,4 +8,6 @@ export class PortalRequestError extends Error {
 }
 export function accessWasLost(error: unknown): boolean;
 export function recoveryFor(error: unknown, mutation?: boolean, confirmed?: boolean): Recovery;
-export function requestPortal(fetcher: typeof fetch, init?: RequestInit, timeoutMs?: number): Promise<Record<string, unknown>>;
+export type PortalPage<T> = { user: { userId: string }; role: string; cases: T[] };
+export function reconcilePortalPage<T extends { id: string }, P extends PortalPage<T>>(previous: P | null, incoming: P, options?: { append?: boolean; retainedCase?: T | null }): P;
+export function requestPortal(fetcher: typeof fetch, init?: RequestInit, timeoutMs?: number, path?: string): Promise<Record<string, unknown>>;

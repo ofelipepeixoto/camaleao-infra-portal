@@ -16,7 +16,7 @@ test("cross-origin, absent origin, fetch metadata and non JSON writes fail close
   }
 });
 test("malformed, oversized and forged role bodies never reach service",async()=>{
-  for (const [body,status] of [["{",400],["[]",400],['{"action":"create","intake":{},"role":"reviewer"}',400],["x".repeat(16385),413]]) {
+  for (const [body,status] of [["{",400],["[]",400],['{"action":"create","intake":{},"role":"reviewer"}',400],["x".repeat(640 * 1024 + 1),413]]) {
     assert.equal((await portalHttp(post(body),{user,db,service})).status,status);
   }
 });
@@ -49,4 +49,19 @@ test('revocation maps the exact published version and hash to the trusted servic
   assert.equal(response.status, 200); assert.equal(received.operation, 'revoke');
   assert.deepEqual(received.body, { id: 'p', version: 2, hash: 'h' });
   assert.equal((await response.json()).case.publication_revoked, true);
+});
+
+
+test('GET accepts one cursor only and rejects extra or repeated query parameters before service', async () => {
+  for (const query of ['?offset=25', '?limit=100', '?cursor=', '?cursor=a&cursor=b', '?cursor=a&role=reviewer', '?url=https://provider.invalid']) {
+    const response = await portalHttp(new Request(url + query), { user, db, service });
+    assert.equal(response.status, 400); assert.equal((await response.json()).code, 'invalid_query');
+  }
+  const cursor = '2026-10-17T10:00:00.000Z|12345678-1234-4123-8123-123456789012';
+  const received = [];
+  const response = await portalHttp(new Request(url + '?' + new URLSearchParams({ cursor })), { user, db,
+    service: async args => { received.push(args); return args.operation === 'session' ? { role: 'client' } : { records: [], nextCursor: cursor }; },
+  });
+  assert.equal(response.status, 200); assert.deepEqual(received[1].body, { cursor });
+  assert.equal((await response.json()).nextCursor, cursor);
 });

@@ -1,4 +1,5 @@
-const MAX_BODY_BYTES = 16_384;
+// Covers the full accepted diagnostic, including fully escaped Unicode JSON.
+const MAX_BODY_BYTES = 640 * 1024;
 
 function json(value, status = 200) {
   return Response.json(value, { status, headers: {
@@ -47,10 +48,13 @@ export async function portalHttp(request, {user, db, reviewerSubject, service}) 
   try {
     const call = (operation, body={}) => service({db,subject:user.userId,reviewerSubject,operation,body});
     if (request.method === "GET") {
+      const params = new URL(request.url).searchParams;
+      if ([...params.keys()].some(key => key !== "cursor") || params.getAll("cursor").length > 1 || (params.has("cursor") && !params.get("cursor")))
+        return json({error:"Parâmetros da lista inválidos. Atualize a lista.",code:"invalid_query"},400);
       const session = await call("session");
-      const {records} = await call("list");
+      const {records,nextCursor} = await call("list", params.has("cursor") ? {cursor:params.get("cursor")} : {});
       return json({user:{userId:user.userId,displayName:user.displayName},role:session.role,
-        apiConfigured:false,cases:records.map(asCase)});
+        apiConfigured:false,cases:records.map(asCase),nextCursor:nextCursor ?? null});
     }
     if (request.method !== "POST") return json({error:"Método não permitido."},405);
     const origin = request.headers.get("Origin");

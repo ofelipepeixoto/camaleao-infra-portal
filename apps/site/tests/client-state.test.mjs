@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reviewIdentity, PortalRequestError, recoveryFor, requestPortal } from '../lib/portal-client-state.mjs';
+import { reviewIdentity, PortalRequestError, recoveryFor, requestPortal, reconcilePortalPage } from '../lib/portal-client-state.mjs';
 
 const draft = { id: 'synthetic-case', version: 1, status: 'draft', draft: { version: 1, hash: 'same-content' } };
 test('review without editing still requires a new confirmation for publication', () => {
@@ -86,4 +86,35 @@ test('session precondition failure carries server code and requires clearing pri
     assert.equal(accessWasLost(error), true); assert.equal(recoveryFor(error).uncertain, false);
     assert.match(recoveryFor(error).message, /conta mudou/); return true;
   });
+});
+
+
+test('page append and acknowledged selection preservation never merge across identity or role changes', () => {
+  const make = (subject = 'a', role = 'client', cases = [{ id: 'first' }]) => ({ user: { userId: subject }, role, cases, nextCursor: 'next' });
+  const previous = make();
+  const older = make('a', 'client', [{ id: 'second' }, { id: 'first' }]);
+  assert.deepEqual(reconcilePortalPage(previous, older, { append: true }).cases.map(item => item.id), ['first', 'second']);
+  const acknowledged = { id: 'older-confirmed', version: 2 };
+  assert.deepEqual(reconcilePortalPage(previous, older, { retainedCase: acknowledged }).cases.map(item => item.id), ['older-confirmed', 'second', 'first']);
+  for (const changed of [make('b'), make('a', 'reviewer')]) {
+    assert.deepEqual(reconcilePortalPage(previous, changed, { append: true, retainedCase: acknowledged }), changed);
+  }
+});
+
+test('pagination request uses only the portal route and rejects provider URLs before fetching', async () => {
+  const cursor = '2026-10-17T12:00:00.000Z|12345678-1234-4123-8123-123456789012';
+  let fetched = 0;
+  const fetcher = async (path) => { fetched++; assert.equal(new URL(path, 'https://portal.invalid').searchParams.get('cursor'), cursor); return Response.json({ cases: [] }); };
+  await requestPortal(fetcher, {}, 15000, '/api/portal?' + new URLSearchParams({ cursor }));
+  for (const path of ['https://provider.invalid/api/portal', '//provider.invalid/api/portal', '/api/other', '/api/portal?offset=25', '/api/portal?cursor=a&cursor=b'])
+    await assert.rejects(requestPortal(fetcher, {}, 15000, path), error => error.status === 400);
+  assert.equal(fetched, 1);
+});
+
+test('oversized frontend review fails preflight with a readable error and does not send any mutation', async () => {
+  let fetched = 0;
+  await assert.rejects(requestPortal(async () => { fetched++; return Response.json({}); }, { method: 'POST', body: JSON.stringify({ diagnostic: '界'.repeat(220000) }) }), error => {
+    assert.equal(error.status, 413); assert.equal(error.code, 'request_too_large'); assert.match(error.message, /Reduza o conteúdo/); return true;
+  });
+  assert.equal(fetched, 0);
 });

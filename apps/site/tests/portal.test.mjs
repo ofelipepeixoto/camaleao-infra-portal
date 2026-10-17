@@ -419,3 +419,63 @@ test('offline SQLite snapshot restore preserves publication, revocation, inactiv
   await rejection(call(db, 'client-c', 'read', { id: inactive.id }), 404);
   assert.equal((await call(db, 'client-c', 'session')).membership_active, false);
 });
+
+
+test('cursor pagination reaches more than 100 cases with fixed pages, tied timestamps and no cross-client leakage', async t => {
+  const db = await setup(t);
+  for (let index = 0; index < 127; index++) await call(db, 'client-a', 'create', { intake });
+  for (let index = 0; index < 7; index++) await call(db, 'client-b', 'create', { intake });
+  db.sqlite.prepare('UPDATE portal_intakes SET updated_at = ?').run('2026-10-17T12:00:00.000Z');
+  const expected = db.sqlite.prepare('SELECT id FROM portal_intakes WHERE owner_subject = ? ORDER BY updated_at DESC, id ASC').all('client-a').map(row => row.id);
+  let cursor, pages = 0; const seen = [];
+  do {
+    const page = await call(db, 'client-a', 'list', cursor ? { cursor } : {});
+    pages++; assert.ok(page.records.length <= 25);
+    seen.push(...page.records.map(record => record.id));
+    cursor = page.nextCursor;
+  } while (cursor);
+  assert.equal(pages, 6); assert.deepEqual(seen, expected); assert.equal(new Set(seen).size, 127);
+  const reviewerPage = await call(db, REVIEWER, 'list');
+  assert.equal(reviewerPage.records.length, 25); assert.ok(reviewerPage.nextCursor);
+  const crossCursor = await call(db, 'client-b', 'list', { cursor: reviewerPage.nextCursor });
+  const bIds = new Set(db.sqlite.prepare('SELECT id FROM portal_intakes WHERE owner_subject = ?').all('client-b').map(row => row.id));
+  assert.ok(crossCursor.records.every(record => bIds.has(record.id)));
+  await rejection(call(db, 'client-a', 'list', { cursor: reviewerPage.nextCursor, offset: 100 }), 400);
+  for (const invalid of ['', 'a'.repeat(1000), '2026-02-30T12:00:00.000Z|' + expected[0], '2026-10-17T12:00:00.000Z|not-an-id'])
+    await rejection(call(db, 'client-a', 'list', { cursor: invalid }), 400);
+  db.sqlite.prepare('UPDATE portal_memberships SET active = 0 WHERE subject = ?').run('client-a');
+  await rejection(call(db, 'client-a', 'list', { cursor: reviewerPage.nextCursor }), 403);
+});
+
+test('cursor pagination orders different timestamps before UUID ties', async t => {
+  const db = await setup(t);
+  for (let index = 0; index < 60; index++) await call(db, 'client-a', 'create', { intake });
+  const allIds = db.sqlite.prepare('SELECT id FROM portal_intakes ORDER BY id').all();
+  allIds.forEach((row, index) => db.sqlite.prepare('UPDATE portal_intakes SET updated_at = ? WHERE id = ?').run(index % 2 ? '2026-10-17T10:00:00.000Z' : '2026-10-17T09:00:00.000Z', row.id));
+  const expected = db.sqlite.prepare('SELECT id FROM portal_intakes ORDER BY updated_at DESC, id ASC').all().map(row => row.id);
+  const first = await call(db, 'client-a', 'list');
+  const second = await call(db, 'client-a', 'list', { cursor: first.nextCursor });
+  const third = await call(db, 'client-a', 'list', { cursor: second.nextCursor });
+  assert.deepEqual([...first.records, ...second.records, ...third.records].map(record => record.id), expected);
+  assert.equal(third.nextCursor, null);
+});
+
+test('HTTP accepts maximum valid Unicode review raw and fully escaped while enforcing the transport cap', async t => {
+  const db = await setup(t);
+  const full = { status: 'draft', goal_summary: '界'.repeat(2000), recommendation: '界'.repeat(8000),
+    alternatives: Array(30).fill('界'.repeat(1000)), missing_information: Array(30).fill('界'.repeat(1000)),
+    evidence_refs: Array(30).fill('界'.repeat(1000)), cost_status: 'unverified', human_review: true };
+  assert.deepEqual(validateDiagnostic(full), full);
+  for (const escaped of [false, true]) {
+    const record = await draft(db);
+    let body = JSON.stringify({ action: 'review', case_id: record.id, version: record.version, hash: record.hash, diagnostic: full });
+    if (escaped) body = body.replace(/[^\x00-\x7F]/g, char => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0'));
+    assert.ok(Buffer.byteLength(body) > 16_384); assert.ok(Buffer.byteLength(body) < 640 * 1024);
+    const request = new Request('https://example.invalid/api/portal', { method: 'POST', headers: { Origin: 'https://example.invalid', 'Content-Type': 'application/json', 'X-Portal-Subject': REVIEWER }, body });
+    const response = await portalHttp(request, { user: { userId: REVIEWER, displayName: 'Reviewer' }, db, reviewerSubject: REVIEWER, service: handlePortal });
+    assert.equal(response.status, 200); assert.deepEqual((await response.json()).case.draft.content, full);
+  }
+  const request = new Request('https://example.invalid/api/portal', { method: 'POST', headers: { Origin: 'https://example.invalid', 'Content-Type': 'application/json', 'X-Portal-Subject': REVIEWER }, body: ' '.repeat(640 * 1024 + 1) });
+  const response = await portalHttp(request, { user: { userId: REVIEWER, displayName: 'Reviewer' }, db, reviewerSubject: REVIEWER, service: handlePortal });
+  assert.equal(response.status, 413);
+});

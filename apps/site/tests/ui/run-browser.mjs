@@ -71,5 +71,7 @@ try {
   if (browser.exitCode === null) browser.kill("SIGKILL");
   server.closeAllConnections();
   await new Promise(resolve => server.close(resolve));
-  await rm(profile, { recursive: true, force: true });
+  // Chromium's helper processes can finish flushing the profile just after the
+  // parent exits. Retry bounded cleanup instead of failing successful UI checks.
+  await rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }

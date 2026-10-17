@@ -36,7 +36,7 @@ window.fetch = async (input, init) => {
   }
   if (deniedRead) return Response.json({ error: "Synthetic denied membership" }, { status: 403 });
   if (readFailure) throw new Error("Synthetic read failure");
-  return Response.json({ user, role, cases: records, apiConfigured: false });
+  return Response.json({ user, role, cases: records, apiConfigured: false, nextCursor: null });
 };
 window.confirm = () => true;
 function assert(condition: unknown, message: string): asserts condition { if (!condition) throw new Error(message); }
@@ -64,7 +64,7 @@ async function run() {
   await wait(() => document.querySelector('[role="alert"]'), "Missing load error");
   assert(!document.body.textContent?.includes("Sua primeira solução começa"), "Failure was shown as an empty list");
   assert(button("Nova necessidade")?.disabled, "Creation must wait for a loaded session");
-  assert(document.activeElement?.getAttribute("role") === "alert", "Error should receive focus");
+  await wait(() => document.activeElement?.getAttribute("role") === "alert", "Error should receive focus");
   checks.push("failed load is distinct from empty, focuses error and blocks creation");
 
   readFailure = false; mount();
