@@ -159,6 +159,21 @@ async function run() {
   assert(!document.body.textContent?.includes(diagnostic.recommendation), "Denied access retained private content");
   assert(button("Nova necessidade")?.disabled, "Denied session permits mutation");
   checks.push("denied refresh clears private content and blocks actions");
+
+  role = "reviewer"; deniedRead = false;
+  records = [published, { ...structuredClone(original), id: "22222222-2222-4222-8222-222222222222", status: "intake", draft: null } as unknown as SyntheticCase, structuredClone(original)];
+  mount();
+  await wait(() => document.querySelectorAll(".case-card").length === 3, "Reviewer queue missing");
+  assert(document.querySelector(".queue-summary")?.textContent?.includes("2 pedidos aguardam ação entre os 3 carregados"), "Queue summary does not describe loaded cases");
+  const queue = [...document.querySelectorAll<HTMLButtonElement>(".case-card")];
+  assert(queue[0].textContent?.includes("Em revisão") && queue[1].textContent?.includes("Registrado") && queue[2].textContent?.includes("Publicado"), "Reviewer action queue is not prioritized");
+  assert(queue[0].getAttribute("aria-pressed") === "true" && document.querySelector(".case-detail h2")?.textContent?.includes("Documentos"), "Initial detail differs from first actionable case");
+  assert(!document.querySelector("details.exact-version")?.hasAttribute("open"), "Technical JSON should not interrupt the review by default");
+  queue[1].click();
+  await wait(() => document.querySelector(".case-detail")?.textContent?.includes("PEDIDO 22222222"), "Selecting a queued case did not change detail");
+  assert(document.activeElement === document.querySelector(".case-detail h2"), "Selected case did not receive heading focus");
+  checks.push("reviewer queue prioritizes loaded pending cases, selects matching detail and keeps technical data optional");
+
   window.__uiResult = { status: "passed", checks };
 }
 window.__uiResult = { status: "running", checks };
