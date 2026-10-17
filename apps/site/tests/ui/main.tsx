@@ -64,7 +64,7 @@ async function run() {
   await wait(() => document.querySelector('[role="alert"]'), "Missing load error");
   assert(!document.body.textContent?.includes("Sua primeira solução começa"), "Failure was shown as an empty list");
   assert(button("Nova necessidade")?.disabled, "Creation must wait for a loaded session");
-  assert(document.activeElement?.getAttribute("role") === "alert", "Error should receive focus");
+  await wait(() => document.activeElement?.getAttribute("role") === "alert", "Error should receive focus");
   checks.push("failed load is distinct from empty, focuses error and blocks creation");
 
   readFailure = false; mount();
