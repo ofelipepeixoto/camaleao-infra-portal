@@ -1,4 +1,6 @@
-/** Persistent portal domain service. No network calls, credentials or paid APIs.
+import { runAiDiagnostic } from './portal-ai.mjs';
+
+/** Persistent portal domain service. Paid calls require explicit server configuration.
  * `subject` must be resolved by the trusted Sites ingress, never a request body.
  * D1 batch is transactional; every write repeats membership and CAS predicates.
  */
@@ -94,10 +96,11 @@ function recordFromRow(row, reviewer) {
     publication_revoked: row.published_version === null && row.revoked_version !== null,
     published_diagnostic: row.published_diagnostic_json ? JSON.parse(row.published_diagnostic_json) : null, created_at: row.created_at, updated_at: row.updated_at };
 }
-async function load(db, subject, reviewer, id) {
+async function load(db, subject, reviewer, id, internalState = false) {
   const row = await stmt(db, `${recordSelect} WHERE i.id = ? AND ${access('i.')}`, [id, ...accessValues(subject, reviewer)]).first();
   if (!row) fail(404, 'not_found', 'Diagnóstico indisponível.');
-  return recordFromRow(row, reviewer);
+  const record = recordFromRow(row, reviewer);
+  return internalState ? { ...record, owner_subject: row.owner_subject, operation_token: row.operation_token } : record;
 }
 function auditStatement(db, { id, subject, token, event, version, hash, now }) {
   return stmt(db, `INSERT INTO portal_audit (id, intake_id, actor_subject, event, version, hash, created_at)
@@ -105,7 +108,7 @@ function auditStatement(db, { id, subject, token, event, version, hash, now }) {
     [crypto.randomUUID(), subject, event, version, hash, now, id, token]);
 }
 
-export async function handlePortal({ db, subject, reviewerSubject, operation, body = {} }) {
+export async function handlePortal({ db, subject, reviewerSubject = '', operation, body = {}, aiEnv = {}, fetcher = fetch }) {
   if (typeof subject !== 'string' || !subject || subject.length > 256 || subject.trim() !== subject || /\s|[\u0000-\u001f]/u.test(subject))
     fail(401, 'authentication_required', 'Entre com sua conta para continuar.');
   if (!db || typeof db.prepare !== 'function' || typeof db.batch !== 'function') fail(503, 'storage_unavailable', 'Persistência ainda indisponível.');
@@ -118,9 +121,10 @@ export async function handlePortal({ db, subject, reviewerSubject, operation, bo
     return { subject, role: reviewer ? 'reviewer' : 'client', membership_active: !!member && member.active === 1 && member.tenant_id === subject, generation_mode: 'deterministic', paid_api_enabled: false };
   }
   if (operation === 'list') {
-    exact(body, Object.hasOwn(body, 'cursor') ? ['cursor'] : []);
+    const hasCursor = !!body && typeof body === 'object' && Object.hasOwn(body, 'cursor');
+    exact(body, hasCursor ? ['cursor'] : []);
     let cursor = null;
-    if (Object.hasOwn(body, 'cursor')) {
+    if (hasCursor) {
       if (typeof body.cursor !== 'string' || body.cursor.length !== 61 || body.cursor[24] !== '|')
         fail(400, 'invalid_cursor', 'O marcador da lista é inválido. Atualize a lista.');
       const updatedAt = body.cursor.slice(0, 24), id = idValue(body.cursor.slice(25));
@@ -162,6 +166,45 @@ export async function handlePortal({ db, subject, reviewerSubject, operation, bo
     return { record };
   }
   if (operation === 'read') { exact(body, ['id']); return { record: await load(db, subject, reviewer, idValue(body.id)) }; }
+  if (operation === 'generate_ai') {
+    if (!reviewer) fail(403, 'reviewer_required', 'Esta operação exige um revisor da Camaleão.');
+    exact(body, ['id', 'expected_version', 'expected_hash', 'operation_id', 'confirm']);
+    const id = idValue(body.id), expected = integer(body.expected_version, 1), expectedHash = hashValue(body.expected_hash);
+    const operationId = idValue(body.operation_id);
+    if (body.confirm !== true) fail(400, 'confirmation_required', 'Confirme o processamento externo deste pedido.');
+    const current = await load(db, subject, reviewer, id, true);
+    if (current.stage !== 'draft' || current.version !== expected || current.hash !== expectedHash)
+      fail(409, 'version_conflict', 'A versão mudou ou não está em preparação. Atualize o pedido.');
+    const ownerSubject = current.owner_subject;
+    const stillAuthorized = async () => {
+      const found = await stmt(db, `SELECT 1 AS ok FROM portal_intakes WHERE id = ? AND stage = 'draft'
+        AND version = ? AND hash = ? AND updated_at = ? AND operation_token = ? AND ${access('')}
+        AND EXISTS (SELECT 1 FROM portal_memberships m WHERE m.subject = ? AND m.tenant_id = ? AND m.active = 1)`,
+        [id, expected, expectedHash, current.updated_at, current.operation_token, ...accessValues(subject, reviewer), ownerSubject, ownerSubject]).first();
+      return !!found;
+    };
+    return runAiDiagnostic({ db, env: aiEnv, subject, ownerSubject, caseId: id, expectedVersion: expected,
+      expectedHash, operationId, intake: current.intake, stillAuthorized, fetcher,
+      attach: async (output) => {
+        const diagnostic = validateDiagnostic(output);
+        if (diagnostic.evidence_refs.length !== 1 || diagnostic.evidence_refs[0] !== `intake:${id}`)
+          fail(409, 'ai_invalid_evidence', 'A resposta contém referências não verificadas. O rascunho não foi anexado.');
+        const hash = await digest(diagnostic), version = expected + 1, token = crypto.randomUUID(), attachedAt = new Date().toISOString();
+        const results = await batch(db, [
+          stmt(db, `UPDATE portal_intakes SET version = ?, hash = ?, stage = 'draft', operation_token = ?, updated_at = ?
+            WHERE id = ? AND stage = 'draft' AND version = ? AND hash = ? AND updated_at = ? AND operation_token = ? AND ${access('')}
+            AND EXISTS (SELECT 1 FROM portal_memberships m WHERE m.subject = ? AND m.tenant_id = ? AND m.active = 1)`,
+            [version, hash, token, attachedAt, id, expected, expectedHash, current.updated_at, current.operation_token, ...accessValues(subject, reviewer), ownerSubject, ownerSubject]),
+          stmt(db, `INSERT INTO portal_revisions (intake_id, version, hash, diagnostic_json, source, actor_subject, created_at)
+            SELECT id, ?, ?, ?, 'openai', ?, ? FROM portal_intakes WHERE id = ? AND operation_token = ?`,
+            [version, hash, canonicalJson(diagnostic), subject, attachedAt, id, token]),
+          auditStatement(db, { id, subject, token, event: 'diagnostic_ai_prepared', version, hash, now: attachedAt }),
+        ]);
+        if (results[0].meta.changes !== 1) fail(409, 'version_conflict', 'A versão ou a permissão mudou. O consumo foi registrado, sem anexar o rascunho.');
+        return { record: await load(db, subject, reviewer, id) };
+      },
+    });
+  }
   if (!['generate', 'review', 'publish', 'revoke'].includes(operation)) fail(404, 'unknown_operation', 'Operação indisponível.');
   if (operation === 'review' || operation === 'publish' || operation === 'revoke') {
     if (!reviewer) fail(403, 'reviewer_required', 'Esta operação exige um revisor da Camaleão.');

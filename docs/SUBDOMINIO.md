@@ -1,75 +1,49 @@
 # Subdomínio — infra.camaleaoweb3.com.br
 
-O portal da Agência Camaleão deve ser um **Site independente no endereço `infra.camaleaoweb3.com.br`**. O site institucional já usa Sites do ChatGPT; a HostGator administra o DNS. Criar um registro DNS não implanta o portal: primeiro publicar o Site, depois associar e validar o hostname.
+## Estado observado
 
-Estado em 11/10/2026: Site separado publicado com audiência privada às 01:22:08 no horário de São Paulo. Associação do subdomínio criada no Sites, com estado `pending`; aguardando os três registros DNS abaixo na HostGator. O endereço `infra.camaleaoweb3.com.br` ainda não foi confirmado ativo.
+O [Camaleão Infra Portal](https://infra.camaleaoweb3.com.br/) é um Site independente da Agência Camaleão. A HostGator administra a zona DNS e o Sites hospeda o portal, a identidade e o banco D1.
 
-| Registro observado | Valor |
+Após o cadastro manual dos registros pelo responsável em 11/10/2026, o Sites confirmou associação **ativa**, provedor **ativo** e **SSL ativo**, sem erro registrado. A jornada foi depois concluída por duas contas distintas: cliente registra e prepara, revisora aprova e publica, cliente confirma **Diagnóstico publicado · versão 2**. O conteúdo publicado correspondeu à versão e ao hash aprovados.
+
+| Registro | Valor |
 | --- | --- |
 | Projeto do portal | `appgprj_6acb0cb852e08191afeac9f98209d362` |
-| URL publicada, privada | [Camaleão Infra Portal](https://camaleao-infra-portal.radarjacarepagua.chatgpt.site) |
-| Conta de publicação atual | Conta conectada do Radar; Site privado |
-| Associação de domínio | `appgdom_6acb0ef9c6c48191bdac83747d2085e2` |
-| Estado da associação | `pending`, aguardando DNS e validação |
-| DNS conectado | Nenhuma capacidade HostGator encontrada nesta execução |
+| Endereço próprio | [infra.camaleaoweb3.com.br](https://infra.camaleaoweb3.com.br/) |
+| Endereço nativo | [Camaleão Infra Portal](https://camaleao-infra-portal.radarjacarepagua.chatgpt.site) |
+| Associação de domínio existente | `appgdom_6acb0ef9c6c48191bdac83747d2085e2` |
+| Audiência | Privada personalizada: proprietário e uma conta externa visitante; dados pessoais omitidos |
+| Administração | Conta conectada do Radar no Sites; DNS sob a conta responsável na HostGator |
+
+O domínio estar em outra conta não impede esse apontamento. A associação DNS também não transfere a propriedade do Site, banco ou permissões para a conta administradora do domínio. A identidade nativa é específica deste Site; uma migração para outro projeto requer configurar novamente audiência, sujeitos e permissões.
 
 ## Responsabilidades
 
-| Lugar | O que configurar |
+| Lugar | Responsabilidade |
 | --- | --- |
-| Sites do ChatGPT | Projeto do portal, código, banco D1, autenticação, audiência e associação do domínio |
-| DNS HostGator | Somente os apontamentos e provas de domínio devolvidos pelo Sites |
-| GitHub Camaleão | Código, migrações, testes e identificação da versão publicada |
+| Sites do ChatGPT | Código, D1, identidade, audiência, variáveis protegidas, domínio e certificado |
+| DNS HostGator | Apontamentos e provas emitidos para a associação exata do Sites |
+| GitHub Camaleão | Código, migrações, verificações e identificação das entregas |
 
-A conexão Sites observada nesta execução lista projetos do Radar, e o portal foi registrado como novo projeto nessa conta. Isso não demonstra acesso à conta que hospeda o site institucional da Camaleão. O portal usa marca Camaleão, mas permanece administrado pela conta conectada atual. O código preparado em `apps/site` é transferível caso a operação precise ocorrer na conta da Camaleão; essa transferência exige nova configuração das identidades específicas do Site.
+## Manutenção do DNS
 
-## Sequência de implantação e estado
+A associação atual já existe. Consultar ou atualizar seu estado usando os IDs acima. Uma nova implantação de código não exige criar outro projeto nem repetir a associação do domínio.
 
-1. Continuar no Site registrado `appgprj_6acb0cb852e08191afeac9f98209d362`, preservando sua identidade e audiência. Confirmar que esse ID está na configuração de hospedagem de `apps/site`; não criar outro projeto para repetir a implantação.
-2. Publicação concluída com schema D1 e identidade nativa. SHA, versão e implantação estão registrados em [Entrega 01](ENTREGA-01.md).
-3. Associação concluída usando `add_custom_domain`, com o `project_id` confirmado. Usar a associação existente `appgdom_6acb0ef9c6c48191bdac83747d2085e2`; não repetir sua criação.
-4. Os valores abaixo foram copiados da resposta do Sites. Não deduzir destinos a partir da URL de publicação, nome do projeto ou de outro domínio.
-5. Pendente: na zona DNS de `camaleaoweb3.com.br` administrada pela HostGator, inserir os registros exatos. A forma de preencher o campo de nome depende da tela atual: conferir se ela aceita o nome relativo ou o hostname completo para evitar duplicar o sufixo.
-6. Atualizar o estado com `refresh_custom_domain_status`, usando os IDs exatos devolvidos pelo serviço. Registrar `status`, `provider_status`, `ssl_status` e eventual `last_error`.
-7. Concluir somente após confirmar domínio ativo, HTTPS válido e jornada autorizada funcionando no novo endereço. O portal atualmente privado não se torna acessível a clientes só por receber um domínio: homologar a audiência e autorização de visitantes separadamente.
+Para eventual correção na HostGator, consultar primeiro os registros atuais e os valores retornados pelo Sites para esta associação. Os valores de verificação não são reproduzidos neste documento; a resposta atual da plataforma é a referência. Um CNAME de subdomínio deve usar o destino efetivamente emitido, sem deduzir a partir da URL nativa.
 
-## Registros exatos para a HostGator
+O [guia oficial da HostGator](https://suporte.hostgator.com.br/hc/pt-br/articles/30813120385427-Como-criar-ou-alterar-um-registro-A-MX-TXT-CNAME-e-outros-na-Zona-DNS) descreve **Domínios → Configurar Domínio → Editar Zona Avançada DNS → Adicionar registro**. Selecionar a zona `camaleaoweb3.com.br`. Se o painel acrescenta o domínio automaticamente, preencher o nome relativo e conferir o nome completo resultante antes de salvar.
 
-Cadastrar os três registros retornados pelo Sites. Os valores TXT são provas públicas de domínio, não credenciais de acesso.
+Alterar somente o registro necessário, preservando raiz, `www`, e-mail e demais serviços. Registrar o valor anterior para eventual retorno. Credenciais de conta e segredos de servidor devem usar o canal protegido do provedor.
 
-| Registro | Nome | Valor |
-| --- | --- | --- |
-| CNAME | `infra.camaleaoweb3.com.br` | `custom-domains.chatgpt.site.` |
-| TXT | `_openai-site-verification.infra.camaleaoweb3.com.br` | `openai-site-verification=LYnrbk8w8wGG_8jeL9zusjTfFTT97Y8TwiX1K0s3DwU` |
-| TXT | `_cf-custom-hostname.infra.camaleaoweb3.com.br` | `f0833a07-914f-49b7-8a7e-7928b3349fac` |
+## Revalidar o endereço
 
-No [guia oficial da HostGator](https://suporte.hostgator.com.br/hc/pt-br/articles/30813120385427-Como-criar-ou-alterar-um-registro-A-MX-TXT-CNAME-e-outros-na-Zona-DNS), a rota é **Domínios → Configurar Domínio → Editar Zona Avançada DNS → Adicionar registro**. Selecionar o domínio `camaleaoweb3.com.br`. Se o editor exigir nomes relativos, os nomes correspondentes são `infra`, `_openai-site-verification.infra` e `_cf-custom-hostname.infra`; conferir o nome completo resultante antes de salvar. Não colar espaços extras nos valores.
+1. Consultar a associação existente no Sites e registrar `status`, `provider_status`, `ssl_status` e `last_error`.
+2. Confirmar HTTPS e o endereço correto nos links de entrada e saída.
+3. Entrar com conta autorizada e consultar o próprio diagnóstico. A audiência privada continua sendo controlada pelo Sites e a autorização de dados pelo portal.
+4. Para uma nova versão funcional, executar o aceite correspondente; domínio ativo não comprova integrações de IA, n8n ou WhatsApp.
 
-O serviço fornece destinos A para domínios raiz e CNAME para subdomínios. Neste projeto, usar os dados devolvidos para o subdomínio selecionado. Se a resposta estiver incompleta, registrar a pendência e consultar o estado; nunca cadastrar um valor inventado.
+A homologação humana de 11/10 permanece um registro daquele percurso. A atualização documental de 17/10 não é uma nova execução completa desse teste.
 
-Guardar no registro de implantação os IDs e os apontamentos retornados. Não publicar tokens de serviço, credenciais de origem ou segredos de runtime nesse registro.
+## Recuperação
 
-## Preservar o site e o DNS existentes
-
-Antes de alterar a zona, verificar se `infra` já está em uso e registrar os valores atuais dos registros que serão modificados. Resolver um conflito específico, em vez de substituir toda a zona ou mudar nameservers.
-
-Conservar os registros atuais do domínio raiz, `www`, e-mail e demais serviços. O portal não requer migrar a hospedagem institucional para a HostGator. Tampouco um subdomínio aumenta a quantidade de Sites permitida pela conta.
-
-A integração DNS não foi encontrada nesta execução; os registros precisam ser aplicados na HostGator por quem administra a zona. Não pedir senha, token nem código de autenticação no chat. Após cadastro, atualizar o estado da associação no Sites; a etapa continua pendente até confirmação de domínio ativo e SSL.
-
-## Verificação do endereço final
-
-- `infra.camaleaoweb3.com.br` resolve para o destino esperado sem conflito de registro.
-- Sites devolve estado ativo e SSL válido, sem erro pendente.
-- A URL abre o portal Camaleão e os links de entrada/saída mantêm o hostname correto.
-- Uma conta autorizada conclui intake, revisor aprova, e o cliente consulta a mesma versão publicada.
-- Uma segunda identidade não acessa os recursos da primeira.
-- `camaleaoweb3.com.br` e `www` continuam servindo o site institucional como antes.
-
-Não prometer um prazo fixo de propagação ou emissão de certificado. Avaliar a resposta do DNS e do serviço para distinguir registro incorreto, prova faltante e validação em andamento.
-
-## Retorno em caso de falha
-
-Se apenas o código falhar, retornar à versão anterior no mesmo Site; não alterar o DNS como primeira medida. Se o apontamento estiver errado, restaurar somente os registros modificados a partir da evidência anterior. Remover a associação do domínio no Sites apenas quando isso fizer parte do retorno escolhido e após considerar o efeito sobre o portal.
-
-Rollback de DNS não apaga o banco. Rollback de código não reverte migrações; consultar [Entrega 01](ENTREGA-01.md) antes de publicar uma versão incompatível.
+Falha de código usa uma versão anterior comprovada do mesmo Site. Falha de DNS usa restauração específica do registro alterado, conforme evidência anterior. Rollback de código ou DNS não desfaz migrações nem dados automaticamente; seguir [Entrega 01](ENTREGA-01.md) e exercitar restauração em ambiente isolado antes da dependência comercial.

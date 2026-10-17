@@ -42,7 +42,7 @@ function asCase(record) {
 }
 
 /** Authentication is supplied ONLY by the native Sites server helper. */
-export async function portalHttp(request, {user, db, reviewerSubject, service}) {
+export async function portalHttp(request, {user, db, reviewerSubject, service, ai = {enabled:false,reason:'IA externa desativada para novas preparações.'}}) {
   if (!user) return json({error:"Entre com sua conta ChatGPT para continuar.",code:"unauthenticated"},401);
   if (!db) return json({error:"O portal está aguardando a configuração do banco.",code:"database_unavailable"},503);
   try {
@@ -54,7 +54,7 @@ export async function portalHttp(request, {user, db, reviewerSubject, service}) 
       const session = await call("session");
       const {records,nextCursor} = await call("list", params.has("cursor") ? {cursor:params.get("cursor")} : {});
       return json({user:{userId:user.userId,displayName:user.displayName},role:session.role,
-        apiConfigured:false,cases:records.map(asCase),nextCursor:nextCursor ?? null});
+        apiConfigured:ai.enabled === true,ai:session.role === 'reviewer' ? ai : undefined,cases:records.map(asCase),nextCursor:nextCursor ?? null});
     }
     if (request.method !== "POST") return json({error:"Método não permitido."},405);
     const origin = request.headers.get("Origin");
@@ -81,6 +81,9 @@ export async function portalHttp(request, {user, db, reviewerSubject, service}) 
       case "review":
         if (!exact(["action","case_id","version","hash","diagnostic"])) return json({error:"Campos não permitidos."},400);
         args={id:body.case_id,expected_version:body.version,expected_hash:body.hash,diagnostic:body.diagnostic}; break;
+      case "generate_ai":
+        if (!exact(["action","case_id","version","hash","operation_id","confirm"])) return json({error:"Campos não permitidos."},400);
+        args={id:body.case_id,expected_version:body.version,expected_hash:body.hash,operation_id:body.operation_id,confirm:body.confirm}; break;
       case "publish":
       case "revoke":
         if (!exact(["action","case_id","version","hash"])) return json({error:"Campos não permitidos."},400);

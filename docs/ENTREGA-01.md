@@ -1,19 +1,26 @@
 # Entrega 01 — diagnóstico persistente da Camaleão
 
-O objetivo desta fatia é homologar **entrada do cliente → diagnóstico → revisão humana → publicação da mesma versão**. O portal terá endereço próprio em `infra.camaleaoweb3.com.br`; o site institucional permanece em `camaleaoweb3.com.br`.
+O objetivo desta fatia foi homologar **entrada do cliente → diagnóstico → revisão humana → publicação da mesma versão**. O portal usa o endereço [infra.camaleaoweb3.com.br](https://infra.camaleaoweb3.com.br/).
 
-Registro de entrega: 11/10/2026. O portal foi publicado no Sites com audiência privada na conta conectada do Radar, às 01:22:08 no horário de São Paulo (04:22:08 UTC). A associação de `infra.camaleaoweb3.com.br` foi criada e aguarda os registros DNS na HostGator. Revisor, acesso de clientes e integrações cobradas ainda precisam de configuração e homologação específicas.
+Registro inicial de entrega: 11/10/2026, publicação privada às 01:22:08 no horário de São Paulo (04:22:08 UTC). Posteriormente, o Sites confirmou domínio e SSL ativos; a variável `CAMALEAO_REVIEWER_SUBJECT` foi configurada na revisão de ambiente 4.
+
+**Aceite humano em 11/10/2026:** duas identidades distintas concluíram cadastro e preparo pelo cliente, revisão e publicação pela revisora. O banco confirmou a versão 2 aprovada e publicada com o mesmo hash. A conta cliente confirmou visualmente **Diagnóstico publicado · versão 2**. Não foram executadas chamadas OpenAI, rotinas n8n ou envios WhatsApp nesse percurso.
 
 | Registro observado | Valor |
 | --- | --- |
 | Projeto Sites | `appgprj_6acb0cb852e08191afeac9f98209d362` |
 | URL publicada, privada | [Camaleão Infra Portal](https://camaleao-infra-portal.radarjacarepagua.chatgpt.site) |
-| SHA da origem publicada no Sites | `48d4ab243c4de5d1ed8b1bac85d4e9c6911a3022` |
-| Implantação | `appgdep_6acb0eda81a08191b57b8cfd2a609e92` |
-| Versão salva | `appgprj_6acb0cb852e08191afeac9f98209d362~appgver_22ba5747d82c8191a5f1b782a9dbed09` |
+| SHA da publicação inicial, histórico | `48d4ab243c4de5d1ed8b1bac85d4e9c6911a3022` |
+| Implantação inicial, histórico | `appgdep_6acb0eda81a08191b57b8cfd2a609e92` |
+| Versão salva inicial, histórico | `appgprj_6acb0cb852e08191afeac9f98209d362~appgver_22ba5747d82c8191a5f1b782a9dbed09` |
 | Código hospedável | `apps/site`, aplicação Vinext |
 | Banco nativo | D1, binding `DB` |
-| Audiência atual | Privada; acesso de clientes externos ainda não homologado |
+| Audiência observada | Privada personalizada: proprietário e uma conta externa visitante; dados pessoais omitidos |
+| Domínio | `infra.camaleaoweb3.com.br`, ativo com SSL ativo |
+| Revisora | Configurada na revisão de ambiente 4 |
+| Homologação humana | Percurso com duas identidades, versão 2 aprovada/publicada e confirmação visual do cliente |
+
+Os IDs de publicação acima registram a primeira entrega, não identificam automaticamente o código atualmente em produção. Na inspeção de 17/10, o Sites informou origem `5ce6ee9b7e11a6799bac4930eec19be5806fef33`, versão salva `appgprj_6acb0cb852e08191afeac9f98209d362~appgver_f87cd9624be48191a04419c08b5b3a78` e implantação `appgdep_6aceace9bd8c8191b6333edc5b300408`. Esses identificadores não constituem, isoladamente, uma nova homologação humana ou confirmação recém-executada de sucesso de implantação.
 
 ## Escopo e decisão de implantação
 
@@ -25,10 +32,10 @@ O backend Python/PostgreSQL descrito no [desenho inicial](ARQUITETURA-E-CONTRATO
 | --- | --- |
 | Interface Camaleão | Publicada em Site privado para intake, diagnóstico e acompanhamento |
 | Identidade | Login nativo Sites; workspace individual derivado do sujeito e autorização de cada operação no servidor |
-| Persistência | Binding D1 `DB` e as cinco tabelas confirmados por consulta à plataforma; jornada autenticada e recuperação hospedada ainda precisam de homologação |
+| Persistência | D1 `DB`; cinco tabelas confirmadas na entrega inicial. Jornada autenticada comprovada com duas identidades; restauração de backup ainda requer ensaio próprio |
 | Diagnóstico determinístico | Referência verificável sem envio a fornecedor externo |
 | OpenAI | Modo pago desativado; sem chave nem adaptador de consumo configurados nesta entrega |
-| Revisão e publicação | Código publicado e testado localmente; revisor ainda não configurado no runtime hospedado |
+| Revisão e publicação | Revisora configurada; versão 2 aprovada/publicada com o mesmo hash, confirmada visualmente pelo cliente |
 | MCP | Laboratório stdio existente; sem exposição remota ou permissão de aprovar/publicar |
 | n8n | Fase 2, rotinas internas após contrato de eventos e autenticação |
 | WhatsApp | Fase 2, conforme [plano do canal oficial](WHATSAPP-OFICIAL.md); nenhum envio incluído nesta fatia |
@@ -44,7 +51,7 @@ O backend Python/PostgreSQL descrito no [desenho inicial](ARQUITETURA-E-CONTRATO
 
 Login no Sites comprova a identidade da pessoa, não seu vínculo com uma empresa nem seu papel de revisor. O tenant desta fatia é derivado do sujeito autenticado; não há convites, grupos empresariais ou administração por organização. Nenhum cliente se promove a administrador por formulário, cabeçalho próprio ou argumento de ferramenta.
 
-O revisor é a identidade exata configurada pelo operador na variável de servidor `CAMALEAO_REVIEWER_SUBJECT`. O valor deve vir do próprio Site; sem configuração, ninguém recebe esse papel. Essa variável ainda não foi definida nesta implantação. Não existe promoção automática do primeiro visitante. Depois de configurada, essa pessoa pode acessar a fila de workspaces para revisão, enquanto os clientes continuam restritos ao próprio workspace. Conteúdo de revisão humana permanece interno até a publicação.
+O revisor é a identidade exata configurada pelo operador na variável de servidor `CAMALEAO_REVIEWER_SUBJECT`. O valor deve vir do próprio Site; sem configuração, ninguém recebe esse papel. Essa variável foi configurada na revisão de ambiente 4. Não existe promoção automática do primeiro visitante. A pessoa configurada pode acessar a fila de workspaces para revisão, enquanto os clientes continuam restritos ao próprio workspace. Conteúdo de revisão humana permanece interno até a publicação.
 
 Para habilitar o revisor, o responsável abre o portal com a conta autorizada, expande seu nome no topo e consulta **Sua conta → Identificador para ativação de revisor**. O operador configura esse identificador exato como variável do servidor pelos controles seguros do Sites. Trata-se de um identificador específico do Site, não de senha ou chave API. Então confirmar que a sessão recebe o papel de revisor e homologar revisão/publicação com dados fictícios.
 
@@ -65,10 +72,10 @@ Campos de tenant e papel não são aceitos nesse contrato. Atualizações usam c
 
 ## Habilitar OpenAI com controle
 
-Esta implementação só produz diagnóstico determinístico. Não contém chamada paga habilitada nem substitui esse modo silenciosamente por um modelo externo. O usuário dispensou o plugin OpenAI Developers. A conexão pode ser configurada diretamente nos segredos do servidor, em uma entrega posterior. Para uma próxima entrega com geração pela API:
+A Entrega 01 produz diagnóstico determinístico. O adaptador controlado está descrito na [Entrega 02](ENTREGA-02-IA.md), em preparação e desligado por padrão. A configuração usa diretamente os segredos do servidor. Para futura ativação real:
 
 1. Confirmar o projeto OpenAI, o modelo avaliado e o teto financeiro autorizado para esta homologação.
-2. Configurar uma chave do projeto OpenAI diretamente nos segredos do servidor Sites por um administrador autorizado, usando o painel seguro. Não colar a chave no chat. Manter somente nomes de variáveis em arquivos de exemplo. O plugin OpenAI Developers foi recusado pelo usuário nesta solicitação; nenhuma integração depende de sua instalação.
+2. Configurar uma chave do projeto OpenAI diretamente nos segredos do servidor Sites por um administrador autorizado, usando o painel seguro. Não colar a chave no chat. Manter somente nomes de variáveis em arquivos de exemplo.
 3. Registrar consentimento e classe de dados permitida. Dados restritos não saem para um provedor externo por um fallback automático.
 4. Implementar e testar a reserva de consumo antes da chamada, limites de entrada/saída, validação estruturada da resposta e reconciliação. Aviso de gasto não substitui bloqueio efetivo.
 5. Executar um teste autorizado com dados fictícios; registrar resultado, modelo, versão do diagnóstico e consumo sem segredos.
@@ -95,7 +102,7 @@ Falta de chave, orçamento ou política de dados deve produzir um estado explíc
 | Chave/cota ausente | Nenhuma chamada OpenAI enviada |
 | Reinício ou nova publicação | Dados persistidos preservados |
 
-Registrar SHA, comando, ambiente e resultado em [verificação](VERIFICACAO.md). Foram informados 45 testes locais aprovados (23 Python e 22 Node), checagem TypeScript e build aprovados, e publicação privada confirmada pela plataforma. QA por navegador nativo estava indisponível. Esses resultados não substituem a homologação de cliente e revisor autenticados no Site publicado, a recuperação após reinício ou uma chamada real de fornecedor.
+Registrar SHA, comando, ambiente e resultado em [verificação](VERIFICACAO.md). Foram informados 45 testes locais aprovados (23 Python e 22 Node), checagem TypeScript e build aprovados, e publicação privada confirmada pela plataforma. QA por navegador nativo estava indisponível. A homologação humana posterior comprova o percurso descrito no início deste documento. Os testes locais e esse aceite não comprovam restauração de backup nem chamada real de fornecedor.
 
 ## Operação e retorno
 
@@ -108,12 +115,13 @@ Backup, exportação/restauração, exclusão e retenção devem ser exercitados
 ## Dependências externas ainda por confirmar
 
 - Site institucional da Camaleão: acesso à respectiva conta ainda não demonstrado; ele não foi alterado.
-- Site independente para o portal: publicado em audiência privada na conta conectada do Radar; acesso de clientes ainda por homologar.
-- Revisor: `CAMALEAO_REVIEWER_SUBJECT` ainda não configurado; identificar a conta no portal e habilitá-la no servidor antes da revisão hospedada.
-- DNS HostGator: nenhuma capacidade conectada encontrada nesta execução; associação do domínio criada, aguardando cadastro dos três registros exatos em [runbook do subdomínio](SUBDOMINIO.md).
-- OpenAI: modo pago desativado; chave de projeto no servidor, adaptador, modelo e teto autorizado ainda precisam ser configurados e validados para a próxima entrega.
+- Site independente para o portal: audiência privada na conta conectada do Radar; uma segunda conta autorizada concluiu a jornada cliente/revisora em 11/10.
+- Revisora: `CAMALEAO_REVIEWER_SUBJECT` configurado na revisão de ambiente 4; valor pessoal omitido.
+- DNS HostGator: os registros foram aplicados pelo responsável; Sites confirmou domínio e SSL ativos. Procedimento em [SUBDOMINIO.md](SUBDOMINIO.md).
+- OpenAI: desligada; [Entrega 02](ENTREGA-02-IA.md) em preparação. Chave protegida, orçamento autorizado e homologação real ainda pendentes.
 - n8n, MCP remoto e WhatsApp: não são requisitos para homologar esta jornada e exigem seus próprios testes e autorizações.
 
 ## Referências de implantação
 
 Este runbook foi preparado com as instruções atuais do plugin Sites para identidade, D1, publicação e domínio personalizado, e com as habilidades Infra Master e Meta Developers para entrega verificável e integração por etapas. O estado observado prevalece sobre desenhos antigos ou recursos apenas planejados.
+

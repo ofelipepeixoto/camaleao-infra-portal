@@ -1,8 +1,22 @@
 # Arquitetura e contratos de integração
 
-Status: desenho alvo e contratos exemplificativos; serviços reais pendentes.
+Status atualizado em 17/10/2026: a jornada do diagnóstico funciona em Sites/Vinext, identidade nativa e D1. O percurso com cliente e revisora distintos foi homologado em 11/10; a conta cliente confirmou a versão 2 publicada. O domínio próprio está ativo com SSL. A preparação OpenAI está descrita na [Entrega 02](ENTREGA-02-IA.md), desligada por padrão.
 
-## Decisões
+## Arquitetura implementada e desenho de expansão
+
+| Camada | Estado implementado |
+| --- | --- |
+| Interface e HTTP | Vinext/Worker do próprio Site |
+| Identidade | Login nativo ChatGPT; sujeito resolvido na fronteira Sites |
+| Isolamento | Workspace individual e autorização de cada operação no servidor |
+| Estado | D1 do portal; versões, aprovação e auditoria persistidas |
+| Revisora | Variável protegida `CAMALEAO_REVIEWER_SUBJECT`, configurada |
+| IA paga | Adaptador e ledger em preparação; ativação real bloqueada por padrão |
+| n8n, MCP remoto, WhatsApp | Inativos para esta jornada |
+
+As tabelas, endpoints e componentes PostgreSQL/Python abaixo descrevem expansão possível. Não devem ser interpretados como serviços já implantados. O desenho ativo não exige migrar o diagnóstico para PostgreSQL. Uma eventual outbox inicial deve usar transação D1 junto ao estado do portal; adotar outro banco exige decisão e migração explícitas.
+
+## Decisões do desenho inicial de expansão
 
 | Decisão | Motivo e condição de revisão |
 | --- | --- |
@@ -15,7 +29,7 @@ Status: desenho alvo e contratos exemplificativos; serviços reais pendentes.
 | n8n interno | Operação e workflows sob Camaleão, análise de licença por uso concreto |
 | Sem Kubernetes/GPU no MVP | Capacidade contratada/privada depende de requisitos e benchmarks |
 
-## Modelo relacional proposto
+## Modelo relacional proposto para expansão
 
 `organizations` → `memberships`, `projects`, `intakes`, `diagnostic_versions`, `proposal_versions`, `documents`, `connection_grants`, `jobs`, `budget_accounts`, `usage_reservations`, `audit_events`, `outbox_events`.
 
@@ -53,7 +67,13 @@ Ferramentas futuras `project_get`, `usage_get`, `document_search` precisam de co
 
 Para remoto, usar SDK compatível fixado, Streamable HTTP, proteção OAuth audience/issuer/scopes, TLS, egress controlado e lista de ferramentas. Não repassar tokens de um recurso para outro. SDK/cliente reais e protocolo completo precisam de testes; a prova stdio não demonstra essa interoperabilidade.
 
-## OpenAI — requisição offline
+## OpenAI — preparação controlada e laboratório offline
+
+A integração em preparação usa Responses no servidor, modelo fixado, saída estruturada, zero ferramentas e ledger D1 de reservas em microUSD. O modo pago permanece desligado por padrão; a publicação da mesma versão aprovada continua sob decisão humana. O contrato, o teto conservador de 304.608 microUSD por operação e as condições de ativação constam da [Entrega 02](ENTREGA-02-IA.md).
+
+O orçamento comercial `monthly_budget_brl` informado pelo cliente não financia automaticamente a API. Os tetos desta preparação são cumulativos global e por cliente, com uma única operação pendente global incluindo estado incerto; não há reset nem retry automático.
+
+### Gerador offline preservado
 
 `scripts/build_openai_request.py --model <versão-aprovada>` cria JSON local com `store:false`, schema de saída, limite de saída e instruções mínimas. Nenhum envio acontece. Não incluir MCP remoto direto nesse exemplo, pois o laboratório stdio não é URL alcançável pela API.
 
@@ -72,3 +92,4 @@ Envelope de evento proposto: `event_id`, `schema_version`, `organization_id`, `p
 Separar dev/teste/piloto; no piloto, rede de serviço, containers sem root, limites de CPU/memória, volumes separados, TLS/proxy e secrets protegidos. Implantar somente depois de inventariar a VPS compartilhada para evitar competição com serviços existentes. Não presumir que Swarm, Portainer ou outro painel está disponível.
 
 Versionar imagem/dependências; migrations revisadas com backup e teste de restore. Promover por ambiente, registrar release e plano de rollback. Mudança de schema destrutiva requer migração em etapas e restauração comprovada. Jobs respeitam cancelamento, expiração e versões para não executar autorizações antigas após rollback.
+
