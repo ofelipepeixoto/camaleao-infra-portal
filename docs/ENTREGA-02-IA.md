@@ -117,9 +117,9 @@ A aplicação só aceita uma tentativa de IA por versão de origem, inclusive ap
 | [PR #2](https://github.com/ofelipepeixoto/camaleao-infra-portal/pull/2) | Camada intermediária existente; revisar junto à base |
 | [PR #3](https://github.com/ofelipepeixoto/camaleao-infra-portal/pull/3) | Base atual `89e1f3e0bfde7d962e31439fb832574070e3b5e1` |
 | [PR #4](https://github.com/ofelipepeixoto/camaleao-infra-portal/pull/4) | Paginação e limite de revisão, acima do PR #3 |
-| PR #5 planejado, link pendente | Adaptador/ledger e documentação, acima da correção anterior |
+| [PR #5](https://github.com/ofelipepeixoto/camaleao-infra-portal/pull/5) | Adaptador/ledger e documentação, acima da correção anterior |
 
-PR #4 foi aberto sobre a base #3; a camada de IA será aberta acima dele. PR aberto, CI e implantação são evidências diferentes. A integração das camadas precisa preservar o histórico e o estado D1.
+PR #4 está aberto sobre a base #3; PR #5 está aberto sobre a correção #4. Ambas as camadas aguardam revisão e integração. PR aberto, CI e implantação são evidências diferentes. A integração das camadas precisa preservar o histórico e o estado D1.
 
 ## Próximas integrações
 
