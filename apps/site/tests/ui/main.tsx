@@ -36,7 +36,7 @@ window.fetch = async (input, init) => {
   }
   if (deniedRead) return Response.json({ error: "Synthetic denied membership" }, { status: 403 });
   if (readFailure) throw new Error("Synthetic read failure");
-  return Response.json({ user, role, cases: records, apiConfigured: false });
+  return Response.json({ user, role, cases: records, apiConfigured: false, nextCursor: null });
 };
 window.confirm = () => true;
 function assert(condition: unknown, message: string): asserts condition { if (!condition) throw new Error(message); }
