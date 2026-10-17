@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { PortalRequestError, accessWasLost, recoveryFor, requestPortal, reviewIdentity, type Recovery } from "../lib/portal-client-state.mjs";
+import { PortalRequestError, accessWasLost, recoveryFor, requestPortal, reconcilePortalPage, reviewIdentity, type Recovery } from "../lib/portal-client-state.mjs";
 import { ArrowRight, ArrowUpRight, Check, ChevronLeft, FileText, Layers, LoaderCircle, LogOut, MessagesSquare, Plus, RefreshCw, ShieldCheck, Workflow } from "lucide-react";
 
 type User = { userId: string; displayName: string };
@@ -12,7 +12,7 @@ type Intake = { goal: "documents" | "process" | "support"; existing_tools: strin
 type Diagnostic = { status: "draft"; goal_summary: string; recommendation: string; alternatives: string[]; missing_information: string[]; evidence_refs: string[]; cost_status: "unverified"; human_review: true };
 type Version = { version: number; hash: string; content: Record<string, unknown> };
 type Case = { id: string; status: Stage; publication_revoked?: boolean; version: number; hash: string | null; created_at?: string; updated_at?: string; intake: Intake; draft?: Version | null; published?: Version | null };
-type PortalData = { user: User; role: Role; cases: Case[]; apiConfigured: boolean };
+type PortalData = { user: User; role: Role; cases: Case[]; apiConfigured: boolean; nextCursor: string | null };
 type View = "overview" | "new";
 
 const goals = {
@@ -49,7 +49,7 @@ function objectBody(value: unknown): Record<string, unknown> {
 }
 function portalBody(body: Record<string, unknown>): PortalData {
   const user = objectBody(body.user);
-  if (typeof user.userId !== "string" || typeof user.displayName !== "string" || !["client", "reviewer"].includes(String(body.role)) || !Array.isArray(body.cases) || typeof body.apiConfigured !== "boolean") throw new Error("Não foi possível carregar seu espaço. Atualize a página.");
+  if (typeof user.userId !== "string" || typeof user.displayName !== "string" || !["client", "reviewer"].includes(String(body.role)) || !Array.isArray(body.cases) || typeof body.apiConfigured !== "boolean" || !(body.nextCursor === null || typeof body.nextCursor === "string")) throw new Error("Não foi possível carregar seu espaço. Atualize a página.");
   return body as unknown as PortalData;
 }
 function asDiagnostic(content: Record<string, unknown>): Diagnostic | null {
@@ -101,13 +101,14 @@ export default function PortalClient({ initialUser }: { initialUser: User }) {
     setHasIntakeDraft(false); setDraftEpoch(value => value + 1); setReviewDirty(false);
     setView("overview"); setNotice("");
   }, []);
-  const acceptPortal = useCallback((portal: PortalData) => {
+  const acceptPortal = useCallback((portal: PortalData, options: { append?: boolean; retainedCase?: Case | null } = {}) => {
     const previous = currentPortal.current;
     if (previous && (previous.user.userId !== portal.user.userId || previous.role !== portal.role)) clearPrivateState();
-    currentPortal.current = portal; setData(portal);
+    const next = reconcilePortalPage<Case, PortalData>(previous, portal, options);
+    currentPortal.current = next; setData(next);
   }, [clearPrivateState]);
-  const load = useCallback(async () => {
-    const body = await requestPortal(fetch);
+  const load = useCallback(async (cursor?: string) => {
+    const body = await requestPortal(fetch, {}, 15000, cursor ? `/api/portal?${new URLSearchParams({ cursor })}` : "/api/portal");
     const portal = portalBody(body);
     return portal;
   }, []);
@@ -133,7 +134,11 @@ export default function PortalClient({ initialUser }: { initialUser: User }) {
       confirmed = true;
       // The write has been acknowledged. A failed GET must not present it as a failed write.
       {
-        setData(previous => previous ? { ...previous, cases: [saved, ...previous.cases.filter(item => item.id !== saved.id)] } : previous);
+        const previous = currentPortal.current;
+        if (previous) {
+          const next = { ...previous, cases: [saved, ...previous.cases.filter(item => item.id !== saved.id)] };
+          currentPortal.current = next; setData(next);
+        }
         setSelectedId(saved.id);
       }
       setReviewDirty(false);
@@ -141,13 +146,27 @@ export default function PortalClient({ initialUser }: { initialUser: User }) {
         setHasIntakeDraft(false); setDraftEpoch(value => value + 1); setView("overview");
       }
       setNotice(({ create: "Sua necessidade foi registrada.", generate: "Diagnóstico inicial preparado para revisão.", review: "Versão revisada e aprovada. Confira a nova versão antes de publicar.", publish: "A versão aprovada foi publicada para o cliente.", revoke: "A publicação foi revogada. O histórico permanece preservado." } as Record<string, string>)[action] ?? "Etapa concluída.");
-      acceptPortal(await load());
+      // Refresh page one after writes, retaining the acknowledged case if an
+      // older page's case is outside it. Identity changes discard that case.
+      acceptPortal(await load(), { retainedCase: saved });
       return true;
     } catch (reason) {
       if (accessWasLost(reason)) clearPrivateState();
       const feedback = recoveryFor(reason, true, confirmed);
       setRecovery(feedback); setError(feedback.message);
       return confirmed;
+    } finally { requestLock.current = false; setBusy(null); }
+  };
+  const loadMore = async () => {
+    const cursor = currentPortal.current?.nextCursor;
+    if (requestLock.current || loading || recovery?.action || !cursor) return;
+    requestLock.current = true; setBusy("load_more"); setError("");
+    try {
+      acceptPortal(await load(cursor), { append: true });
+      setRecovery(null);
+    } catch (reason) {
+      if (accessWasLost(reason)) clearPrivateState();
+      const feedback = recoveryFor(reason); setRecovery(feedback); setError(feedback.message);
     } finally { requestLock.current = false; setBusy(null); }
   };
   const refresh = async () => {
@@ -193,9 +212,9 @@ export default function PortalClient({ initialUser }: { initialUser: User }) {
           <div hidden={view !== "new"}><IntakeWizard key={`${user.userId}-${draftEpoch}`} active={view === "new"} busy={actionsBlocked} onCancel={() => setView("overview")} onSubmit={(intake, key) => act("create", { intake, idempotency_key: key })} /></div>
           {view === "overview" && <>
             <div className="page-heading"><div><h1 ref={heading} tabIndex={-1}>{role === "reviewer" ? "Cada plano, uma decisão consciente." : "Da necessidade ao próximo passo."}</h1><p>{role === "reviewer" ? "Revise o diagnóstico e publique a versão aprovada para o cliente." : "Acompanhe seu diagnóstico e avance com a Camaleão."}</p></div><button className="button primary" onClick={openWizard} disabled={actionsBlocked}><Plus size={17} /> {hasIntakeDraft ? "Retomar necessidade" : "Nova necessidade"}</button></div>
-            <div className="stats-grid"><div className="stat-card"><span>Pedidos registrados</span><strong>{data ? cases.length.toString().padStart(2, "0") : "—"}</strong><Layers size={20} /></div><div className="stat-card"><span>Na etapa de revisão</span><strong>{data ? reviewingCount.toString().padStart(2, "0") : "—"}</strong><ShieldCheck size={20} /></div><div className="stat-card"><span>Diagnósticos publicados</span><strong>{data ? publishedCount.toString().padStart(2, "0") : "—"}</strong><FileText size={20} /></div></div>
+            <div className="stats-grid"><div className="stat-card"><span>Pedidos carregados</span><strong>{data ? cases.length.toString().padStart(2, "0") : "—"}</strong><Layers size={20} /></div><div className="stat-card"><span>Em revisão entre os carregados</span><strong>{data ? reviewingCount.toString().padStart(2, "0") : "—"}</strong><ShieldCheck size={20} /></div><div className="stat-card"><span>Publicados entre os carregados</span><strong>{data ? publishedCount.toString().padStart(2, "0") : "—"}</strong><FileText size={20} /></div></div>
             <div className="section-heading"><h2>{role === "reviewer" ? "Fila de diagnósticos" : "Sua jornada com a Camaleão"}</h2><button className="quiet-button" onClick={refresh} disabled={loading || busy !== null}><RefreshCw size={14} className={loading ? "spin" : ""} /> Atualizar</button></div>
-            {loading && !data ? <div className="empty-state" role="status"><LoaderCircle className="spin" size={24} /><h3>Carregando seu espaço</h3><p>Buscando seus pedidos e as últimas versões.</p></div> : !data ? <div className="empty-state"><h2>Seu espaço ainda não foi carregado.</h2><p>Use “Conferir estado salvo” para recuperar seus pedidos antes de registrar uma nova necessidade.</p></div> : cases.length === 0 ? <div className="empty-state"><span className="empty-icon"><Workflow size={28} /></span><span className="eyebrow">COMECE COM O QUE VOCÊ PRECISA</span><h2>Sua primeira solução começa<br />com uma boa pergunta.</h2><p>Você não precisa escolher a tecnologia agora. Conte a necessidade, e nós organizamos os próximos passos.</p><button className="button primary" disabled={actionsBlocked} onClick={openWizard}>Iniciar meu diagnóstico <ArrowRight size={17} /></button></div> : <div className="cases-layout"><div className="case-list" aria-label="Pedidos">{cases.map((item) => { const GoalIcon = goals[item.intake.goal]?.Icon ?? FileText; return <button key={item.id} className={`case-card ${selected?.id === item.id ? "selected" : ""}`} disabled={busy !== null || loading} aria-pressed={selected?.id === item.id} onClick={() => selectCase(item.id)}><span className="case-card-icon"><GoalIcon size={20} /></span><span className="case-card-copy"><strong>{goals[item.intake.goal]?.short ?? "Diagnóstico"}</strong><small>Pedido {item.id.slice(0, 8)} · {dateLabel(item.created_at)}</small><span className={`status-tag stage-${item.status}`}>{shortLabels[item.status]}</span></span><ArrowUpRight size={15} /></button>; })}</div>{selected && <CaseDetail key={reviewIdentity(selected, role, user.userId)} item={selected} role={role} busy={actionsBlocked ? (busy ?? "sync") : null} onDirty={() => setReviewDirty(true)} apiConfigured={data?.apiConfigured ?? false} onAction={act} />}</div>}
+            {loading && !data ? <div className="empty-state" role="status"><LoaderCircle className="spin" size={24} /><h3>Carregando seu espaço</h3><p>Buscando seus pedidos e as últimas versões.</p></div> : !data ? <div className="empty-state"><h2>Seu espaço ainda não foi carregado.</h2><p>Use “Conferir estado salvo” para recuperar seus pedidos antes de registrar uma nova necessidade.</p></div> : cases.length === 0 ? <div className="empty-state"><span className="empty-icon"><Workflow size={28} /></span><span className="eyebrow">COMECE COM O QUE VOCÊ PRECISA</span><h2>Sua primeira solução começa<br />com uma boa pergunta.</h2><p>Você não precisa escolher a tecnologia agora. Conte a necessidade, e nós organizamos os próximos passos.</p><button className="button primary" disabled={actionsBlocked} onClick={openWizard}>Iniciar meu diagnóstico <ArrowRight size={17} /></button></div> : <div className="cases-layout"><div className="case-list" aria-label="Pedidos">{cases.map((item) => { const GoalIcon = goals[item.intake.goal]?.Icon ?? FileText; return <button key={item.id} className={`case-card ${selected?.id === item.id ? "selected" : ""}`} disabled={busy !== null || loading} aria-pressed={selected?.id === item.id} onClick={() => selectCase(item.id)}><span className="case-card-icon"><GoalIcon size={20} /></span><span className="case-card-copy"><strong>{goals[item.intake.goal]?.short ?? "Diagnóstico"}</strong><small>Pedido {item.id.slice(0, 8)} · {dateLabel(item.created_at)}</small><span className={`status-tag stage-${item.status}`}>{shortLabels[item.status]}</span></span><ArrowUpRight size={15} /></button>; })}<p role="status">{cases.length} pedido(s) carregado(s).{data.nextCursor ? " Há mais pedidos disponíveis." : " Fim da lista carregada."}</p>{data.nextCursor && <button className="button" disabled={actionsBlocked} onClick={loadMore}>{busy === "load_more" ? "Carregando…" : "Carregar mais"}</button>}</div>{selected && <CaseDetail key={reviewIdentity(selected, role, user.userId)} item={selected} role={role} busy={actionsBlocked ? (busy ?? "sync") : null} onDirty={() => setReviewDirty(true)} apiConfigured={data?.apiConfigured ?? false} onAction={act} />}</div>}
           </>}
           <footer className="workspace-footer"><span>Agência Camaleão</span><span>Necessidade → diagnóstico → revisão → publicação</span></footer>
         </main>

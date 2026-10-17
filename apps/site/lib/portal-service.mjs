@@ -118,11 +118,27 @@ export async function handlePortal({ db, subject, reviewerSubject, operation, bo
     return { subject, role: reviewer ? 'reviewer' : 'client', membership_active: !!member && member.active === 1 && member.tenant_id === subject, generation_mode: 'deterministic', paid_api_enabled: false };
   }
   if (operation === 'list') {
-    exact(body, []);
+    exact(body, Object.hasOwn(body, 'cursor') ? ['cursor'] : []);
+    let cursor = null;
+    if (Object.hasOwn(body, 'cursor')) {
+      if (typeof body.cursor !== 'string' || body.cursor.length !== 61 || body.cursor[24] !== '|')
+        fail(400, 'invalid_cursor', 'O marcador da lista é inválido. Atualize a lista.');
+      const updatedAt = body.cursor.slice(0, 24), id = idValue(body.cursor.slice(25));
+      const time = new Date(updatedAt);
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(updatedAt) || Number.isNaN(time.getTime()) || time.toISOString() !== updatedAt)
+        fail(400, 'invalid_cursor', 'O marcador da lista é inválido. Atualize a lista.');
+      cursor = { updatedAt, id };
+    }
     const member = await stmt(db, 'SELECT active, tenant_id FROM portal_memberships WHERE subject = ?', [subject]).first();
     if (member && (member.active !== 1 || member.tenant_id !== subject)) fail(403, 'membership_inactive', 'Acesso ao portal desativado.');
-    const result = await stmt(db, `${recordSelect} WHERE ${access('i.')} ORDER BY i.updated_at DESC, i.id LIMIT 100`, accessValues(subject, reviewer)).all();
-    return { records: result.results.map(row => recordFromRow(row, reviewer)) };
+    // Keyset pagination retains deterministic ordering for equal timestamps.
+    // Each page independently enforces current membership and record ownership.
+    const after = cursor ? ' AND (i.updated_at < ? OR (i.updated_at = ? AND i.id > ?))' : '';
+    const values = [...accessValues(subject, reviewer), ...(cursor ? [cursor.updatedAt, cursor.updatedAt, cursor.id] : [])];
+    const result = await stmt(db, `${recordSelect} WHERE ${access('i.')}${after} ORDER BY i.updated_at DESC, i.id ASC LIMIT 26`, values).all();
+    const rows = result.results.slice(0, 25), last = rows.at(-1);
+    return { records: rows.map(row => recordFromRow(row, reviewer)),
+      nextCursor: result.results.length > 25 ? `${last.updated_at}|${last.id}` : null };
   }
   if (operation === 'create') {
     exact(body, ['intake', 'idempotency_key']);

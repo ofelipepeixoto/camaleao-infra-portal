@@ -56,11 +56,25 @@ export function recoveryFor(error, mutation = false, confirmed = false) {
   };
 }
 
-export async function requestPortal(fetcher, init = {}, timeoutMs = 15000) {
+// Pages and acknowledged writes may only be combined within the same identity
+// and role. A changed session replaces every previously displayed private case.
+export function reconcilePortalPage(previous, incoming, { append = false, retainedCase = null } = {}) {
+  if (!previous || previous.user.userId !== incoming.user.userId || previous.role !== incoming.role) return incoming;
+  const cases = append ? [...previous.cases, ...incoming.cases.filter(item => !previous.cases.some(existing => existing.id === item.id))] : [...incoming.cases];
+  if (retainedCase && !cases.some(item => item.id === retainedCase.id)) cases.unshift(retainedCase);
+  return { ...incoming, cases };
+}
+
+export async function requestPortal(fetcher, init = {}, timeoutMs = 15000, path = "/api/portal") {
+  const target = new URL(path, "https://portal.invalid");
+  if (target.origin !== "https://portal.invalid" || target.pathname !== "/api/portal" || target.hash || [...target.searchParams.keys()].some(key => key !== "cursor") || target.searchParams.getAll("cursor").length > 1)
+    throw new PortalRequestError("O endereço da lista é inválido. Atualize o portal.", 400);
+  if (typeof init.body === "string" && new TextEncoder().encode(init.body).byteLength > 640 * 1024)
+    throw new PortalRequestError("A revisão excede o tamanho permitido. Reduza o conteúdo antes de salvar.", 413, "request_too_large");
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetcher("/api/portal", { credentials: "same-origin", cache: "no-store", ...init, signal: controller.signal });
+    const response = await fetcher(`${target.pathname}${target.search}`, { credentials: "same-origin", cache: "no-store", ...init, signal: controller.signal });
     let body;
     try { body = await response.json(); }
     catch { throw new PortalRequestError("A resposta do portal não pôde ser lida.", response.status); }
