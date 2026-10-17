@@ -70,6 +70,7 @@ button:not(:disabled):active { transform:translateY(1px); }
 .section-heading { display:flex; align-items:center; justify-content:space-between; margin:29px 0 15px; }
 .section-heading h2 { font-size:15px; font-weight:500; margin:0; }
 .section-heading .quiet-button { font-size:11px; }
+.queue-summary { margin:-5px 0 16px; font-size:12px; line-height:1.6; color:#a9bea9; }
 .empty-state { padding:45px 30px; min-height:315px; border:1px solid var(--line); border-radius:12px; display:flex; flex-direction:column; align-items:center; text-align:center; background:radial-gradient(ellipse at 50% 0%,#274f1960,transparent 70%),#101d16; }
 .empty-icon { width:64px; height:64px; border-radius:17px; border:1px solid #3a552d; color:var(--lime); background:#20331c; display:flex; align-items:center; justify-content:center; margin-bottom:23px; }
 .empty-icon.small { width:50px; height:50px; margin-bottom:17px; border-radius:12px; }
