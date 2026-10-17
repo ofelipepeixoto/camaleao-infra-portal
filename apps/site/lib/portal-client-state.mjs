@@ -20,6 +20,9 @@ export function accessWasLost(error) {
 
 export function recoveryFor(error, mutation = false, confirmed = false) {
   const status = error instanceof PortalRequestError ? error.status : null;
+  if (error instanceof PortalRequestError && error.code?.startsWith('ai_')) return {
+    message: error.message, action: 'refresh', uncertain: ['ai_outcome_unknown', 'ai_usage_unknown', 'ai_ledger_failed'].includes(error.code),
+  };
   if (error instanceof PortalRequestError && error.code === "session_changed") return {
     message: "A conta mudou. O conteúdo anterior foi removido desta tela. Atualize o portal e confirme novamente.",
     action: "refresh", uncertain: false,

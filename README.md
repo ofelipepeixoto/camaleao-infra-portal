@@ -16,6 +16,12 @@ Portal em homologação para transformar necessidades de infraestrutura de IA em
 - [Fontes e limites](docs/FONTES-E-LIMITES.md)
 - [Verificação realizada](docs/VERIFICACAO.md)
 
+## Estado verificado
+
+O [portal privado](https://infra.camaleaoweb3.com.br/) tem domínio e SSL ativos no Sites. Em 11/10/2026, uma conta cliente e uma conta revisora distintas concluíram necessidade → diagnóstico → revisão humana → publicação. Os registros confirmaram versão 2 aprovada e publicada com o mesmo hash; a conta cliente confirmou visualmente **Diagnóstico publicado · versão 2**. Esse aceite cobre o percurso testado, sem habilitar integrações externas.
+
+O revisor está configurado por variável de servidor protegida. Identificadores de usuário e dados da audiência privada não fazem parte da documentação pública.
+
 ## Primeira entrega funcional
 
 A aplicação em `apps/site` usa Sites/Vinext, login ChatGPT e banco D1. A jornada conecta cadastro de necessidade, diagnóstico inicial por critérios, revisão humana e publicação da versão aprovada. Cada pessoa trabalha em seu espaço individual; times empresariais entram em uma próxima entrega.
@@ -25,7 +31,7 @@ A aplicação em `apps/site` usa Sites/Vinext, login ChatGPT e banco D1. A jorna
 - Revisor definido por `CAMALEAO_REVIEWER_SUBJECT` em configuração segura do servidor, sem promoção por formulário.
 - Publicação condicionada à versão e ao conteúdo da aprovação.
 - API OpenAI desativada nesta entrega; não há envio a provedores de IA nem consumo pago.
-- Subdomínio reservado como objetivo: `infra.camaleaoweb3.com.br`. A configuração DNS usa somente os valores reais retornados pelo Sites.
+- Subdomínio ativo: [infra.camaleaoweb3.com.br](https://infra.camaleaoweb3.com.br/), com SSL ativo e audiência privada.
 
 Veja [Entrega 01](docs/ENTREGA-01.md), [subdomínio e HostGator](docs/SUBDOMINIO.md) e [verificação](docs/VERIFICACAO.md) para o estado observado da implantação.
 
@@ -67,8 +73,13 @@ node --test apps/site/tests/*.test.mjs
 
 Para desenvolver a interface, usar a configuração e o lockfile em `apps/site`. A publicação é feita pelo fluxo nativo do Sites, que aplica as migrações de `apps/site/drizzle` e preserva o ID em `.openai/hosting.json`. Valores de ambiente e credenciais nunca entram no repositório.
 
-A API OpenAI permanece desativada nesta entrega. Sua ativação futura exige uma chave de projeto configurada diretamente nos segredos do servidor e controles persistentes de consumo. Configurar somente a chave não habilita a integração atual; o plugin OpenAI Developers foi dispensado pelo usuário.
+## Próxima entrega: geração assistida com controle de consumo
+
+A [Entrega 02](docs/ENTREGA-02-IA.md) prepara um adaptador OpenAI com ledger D1, reservas em microUSD, tetos cumulativos global e por cliente e revisão humana. A implementação e suas evidências estão em preparação; nenhum resultado de teste novo deve ser inferido deste documento.
+
+A API permanece desligada por padrão. Ativação exige autorização financeira, chave protegida no servidor, modelo fixado e preço com validade máxima de 30 dias. O orçamento comercial informado pelo cliente não autoriza gasto da API. Nenhuma chamada paga integra esta preparação. n8n e WhatsApp continuam inativos.
 
 ## Autoria e direitos
 
 Projeto original preparado para a Agência Camaleão e Carlos Felipe. Não é fork. A decisão de licença de distribuição permanece pendente; não foi concedida licença open source nesta entrega. Licenças de serviços, modelos e componentes externos devem ser verificadas por versão e uso antes de incorporar ou revender.
+
