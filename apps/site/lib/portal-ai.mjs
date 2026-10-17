@@ -114,14 +114,18 @@ export async function runAiDiagnostic({ db, env = {}, subject, ownerSubject, cas
   let allowed = false;
   try { allowed = await stillAuthorized() === true; } catch { /* Authorization fails closed before paid dispatch. */ }
   if (!allowed) { await finish('settled', 0, 'authorization_changed'); fail(409, 'ai_authorization_changed', 'A versão ou a permissão mudou. Atualize o pedido.'); }
-  let body;
+  let body, providerStatus = null;
   const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 45000);
   try {
     const response = await fetcher(ENDPOINT, { method: 'POST', redirect: 'error', signal: controller.signal,
       headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json', 'X-Client-Request-Id': operationId }, body: payload });
+    providerStatus = response.status;
     if (!response.ok) throw new Error('provider_error');
     body = await readResponse(response);
   } catch {
+    // No body, credential or intake in logs. HTTP status distinguishes a
+    // provider rejection from a transport failure during later reconciliation.
+    console.error('Camaleao AI outcome unknown', { operationId, providerStatus });
     await finish('unknown', 0, 'provider_outcome_unknown');
     fail(409, 'ai_outcome_unknown', 'O resultado do provedor não foi confirmado. A reserva permanece bloqueada para conferência; não repita o envio.');
   } finally { clearTimeout(timeout); }
