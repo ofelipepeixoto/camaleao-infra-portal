@@ -51,6 +51,17 @@ test('revocation maps the exact published version and hash to the trusted servic
   assert.equal((await response.json()).case.publication_revoked, true);
 });
 
+test('reconciliation requires exact HTTP fields and routes through the trusted identity', async () => {
+  let received;
+  const payload = { action: 'reconcile_ai', operation_id: 'local-operation', confirm: true };
+  const options = { user, db, service: async args => { received = args; return { record: { id: 'case', stage: 'draft', version: 1, hash: 'hash' } }; } };
+  assert.equal((await portalHttp(post(JSON.stringify({ ...payload, spent_microusd: 0 })), options)).status, 400);
+  assert.equal((await portalHttp(post(JSON.stringify(payload)), options)).status, 200);
+  assert.equal(received.subject, user.userId);
+  assert.equal(received.operation, 'reconcile_ai');
+  assert.deepEqual(received.body, { operation_id: payload.operation_id, confirm: true });
+});
+
 
 test('GET accepts one cursor only and rejects extra or repeated query parameters before service', async () => {
   for (const query of ['?offset=25', '?limit=100', '?cursor=', '?cursor=a&cursor=b', '?cursor=a&role=reviewer', '?url=https://provider.invalid']) {

@@ -118,7 +118,14 @@ export async function handlePortal({ db, subject, reviewerSubject = '', operatio
     exact(body, []);
     if (reviewer) await stmt(db, 'INSERT INTO portal_memberships (subject, tenant_id, active, created_at) VALUES (?, ?, 1, ?) ON CONFLICT(subject) DO NOTHING', [subject, subject, now]).run();
     const member = await stmt(db, 'SELECT active, tenant_id FROM portal_memberships WHERE subject = ?', [subject]).first();
-    return { subject, role: reviewer ? 'reviewer' : 'client', membership_active: !!member && member.active === 1 && member.tenant_id === subject, generation_mode: 'deterministic', paid_api_enabled: false };
+    const reconciliationId = aiEnv.CAMALEAO_AI_ENABLED !== 'true' ? aiEnv.CAMALEAO_AI_RECONCILE_OPERATION_ID : null;
+    const pendingAi = reviewer && member?.active === 1 && member.tenant_id === subject && typeof reconciliationId === 'string'
+      && /^[0-9a-f-]{36}$/.test(reconciliationId)
+      ? await stmt(db, `SELECT id, case_id, reserved_microusd, created_at FROM portal_ai_operations
+          WHERE id = ? AND status = 'unknown' AND error_code = 'provider_outcome_unknown'
+          AND provider_response_id IS NULL AND spent_microusd = 0`, [reconciliationId]).first() : null;
+    return { subject, role: reviewer ? 'reviewer' : 'client', membership_active: !!member && member.active === 1 && member.tenant_id === subject,
+      generation_mode: 'deterministic', paid_api_enabled: false, pending_ai: pendingAi };
   }
   if (operation === 'list') {
     const hasCursor = !!body && typeof body === 'object' && Object.hasOwn(body, 'cursor');
@@ -166,6 +173,36 @@ export async function handlePortal({ db, subject, reviewerSubject = '', operatio
     return { record };
   }
   if (operation === 'read') { exact(body, ['id']); return { record: await load(db, subject, reviewer, idValue(body.id)) }; }
+  if (operation === 'reconcile_ai') {
+    if (!reviewer) fail(403, 'reviewer_required', 'Esta operação exige um revisor da Camaleão.');
+    exact(body, ['operation_id', 'confirm']);
+    if (body.confirm !== true) fail(400, 'confirmation_required', 'Confirme a conciliação conservadora.');
+    const operationId = idValue(body.operation_id);
+    if (aiEnv.CAMALEAO_AI_ENABLED === 'true' || aiEnv.CAMALEAO_AI_RECONCILE_OPERATION_ID !== operationId)
+      fail(409, 'reconciliation_disabled', 'A conciliação específica não está habilitada com a IA desativada.');
+    const item = await stmt(db, `SELECT case_id, expected_version, expected_hash FROM portal_ai_operations
+      WHERE id = ? AND status = 'unknown' AND error_code = 'provider_outcome_unknown'
+      AND provider_response_id IS NULL AND spent_microusd = 0`, [operationId]).first();
+    if (!item) fail(409, 'reconciliation_conflict', 'Esta operação já mudou. Confira o registro antes de continuar.');
+    const current = await load(db, subject, reviewer, item.case_id, true);
+    const reconciledAt = new Date().toISOString(), event = 'ai_unknown_reconciled_ceiling';
+    const results = await batch(db, [
+      stmt(db, `UPDATE portal_ai_operations SET status = 'settled', spent_microusd = reserved_microusd,
+        error_code = 'reconciled_ceiling_unverified', completed_at = ?
+        WHERE id = ? AND status = 'unknown' AND error_code = 'provider_outcome_unknown'
+        AND provider_response_id IS NULL AND spent_microusd = 0
+        AND EXISTS (SELECT 1 FROM portal_memberships m WHERE m.subject = ? AND m.tenant_id = ? AND m.active = 1)`,
+      [reconciledAt, operationId, subject, subject]),
+      stmt(db, `INSERT INTO portal_audit (id, intake_id, actor_subject, event, version, hash, created_at)
+        SELECT ?, o.case_id, ?, ?, o.expected_version, o.expected_hash, ? FROM portal_ai_operations o
+        WHERE o.id = ? AND o.status = 'settled' AND o.error_code = 'reconciled_ceiling_unverified'
+        AND NOT EXISTS (SELECT 1 FROM portal_audit a WHERE a.intake_id = o.case_id AND a.version = o.expected_version AND a.event = ?)`,
+      [crypto.randomUUID(), subject, event, reconciledAt, operationId, event]),
+    ]);
+    if (results[0].meta.changes !== 1 || results[1].meta.changes !== 1)
+      fail(409, 'reconciliation_conflict', 'Não foi possível conciliar esta operação. Confira o registro.');
+    return { record: await load(db, subject, reviewer, current.id) };
+  }
   if (operation === 'generate_ai') {
     if (!reviewer) fail(403, 'reviewer_required', 'Esta operação exige um revisor da Camaleão.');
     exact(body, ['id', 'expected_version', 'expected_hash', 'operation_id', 'confirm']);

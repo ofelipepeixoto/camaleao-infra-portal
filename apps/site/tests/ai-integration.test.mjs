@@ -195,6 +195,34 @@ test('unexpected provider model fails closed with retained reservation and no dr
   assert.equal(revisions(db, record.id).length, 1); assert.equal(ledger(db)[0].status, 'unknown'); assert.equal(ledger(db)[0].reserved_microusd, AI_RESERVE_MICROUSD);
 });
 
+test('reviewer reconciles one unknown result at its reserved ceiling without a provider call or replay', async t => {
+  const db = await database(t), record = await draft(db), operationId = crypto.randomUUID();
+  let calls = 0;
+  await rejected(ai(db, record, { fetcher: async () => { calls++; throw new Error('provider result unavailable'); } },
+    { operation_id: operationId }), 409, 'ai_outcome_unknown');
+  const disabled = { CAMALEAO_AI_ENABLED: 'false', CAMALEAO_AI_RECONCILE_OPERATION_ID: operationId };
+  assert.equal((await call(db, REVIEWER, 'session', {}, { aiEnv: disabled })).pending_ai.id, operationId);
+  assert.equal((await call(db, OWNER, 'session', {}, { aiEnv: disabled })).pending_ai, null);
+  await rejected(call(db, OWNER, 'reconcile_ai', { operation_id: operationId, confirm: true }, { aiEnv: disabled }), 403, 'reviewer_required');
+  await rejected(call(db, REVIEWER, 'reconcile_ai', { operation_id: operationId, confirm: false }, { aiEnv: disabled }), 400, 'confirmation_required');
+  await rejected(call(db, REVIEWER, 'reconcile_ai', { operation_id: operationId, confirm: true },
+    { aiEnv: { ...disabled, CAMALEAO_AI_ENABLED: 'true' } }), 409, 'reconciliation_disabled');
+  db.sqlite.exec(`CREATE TRIGGER abort_ai_reconciliation BEFORE INSERT ON portal_audit
+    WHEN NEW.event = 'ai_unknown_reconciled_ceiling' BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END`);
+  await assert.rejects(call(db, REVIEWER, 'reconcile_ai', { operation_id: operationId, confirm: true }, { aiEnv: disabled }));
+  assert.equal(ledger(db)[0].status, 'unknown');
+  db.sqlite.exec('DROP TRIGGER abort_ai_reconciliation');
+  const result = await call(db, REVIEWER, 'reconcile_ai', { operation_id: operationId, confirm: true }, { aiEnv: disabled });
+  assert.equal(result.record.version, record.version);
+  const booked = ledger(db)[0];
+  assert.equal(booked.status, 'settled'); assert.equal(booked.spent_microusd, AI_RESERVE_MICROUSD);
+  assert.equal(booked.error_code, 'reconciled_ceiling_unverified'); assert.equal(booked.provider_response_id, null);
+  assert.equal((await call(db, REVIEWER, 'session', {}, { aiEnv: disabled })).pending_ai, null);
+  assert.equal(db.sqlite.prepare("SELECT COUNT(*) AS n FROM portal_audit WHERE event='ai_unknown_reconciled_ceiling'").get().n, 1);
+  await rejected(call(db, REVIEWER, 'reconcile_ai', { operation_id: operationId, confirm: true }, { aiEnv: disabled }), 409, 'reconciliation_conflict');
+  assert.equal(calls, 1); assert.equal(revisions(db, record.id).length, 1);
+});
+
 test('migration preserves existing publication, approval, revision and audit history with foreign keys enabled', async t => {
   const db = await database(t, true), original = await draft(db), approval = await reviewed(db, original);
   await publish(db, approval);

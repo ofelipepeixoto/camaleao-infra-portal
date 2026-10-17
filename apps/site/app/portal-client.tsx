@@ -13,7 +13,8 @@ type Diagnostic = { status: "draft"; goal_summary: string; recommendation: strin
 type Version = { version: number; hash: string; content: Record<string, unknown> };
 type Case = { id: string; status: Stage; publication_revoked?: boolean; version: number; hash: string | null; created_at?: string; updated_at?: string; intake: Intake; draft?: Version | null; published?: Version | null };
 type AiReadiness = { enabled: boolean; reason: string };
-type PortalData = { user: User; role: Role; cases: Case[]; apiConfigured: boolean; nextCursor: string | null; ai?: AiReadiness };
+type PendingAi = { id: string; case_id: string; reserved_microusd: number; created_at: string };
+type PortalData = { user: User; role: Role; cases: Case[]; apiConfigured: boolean; nextCursor: string | null; ai?: AiReadiness; pendingAi?: PendingAi | null };
 type View = "overview" | "new";
 
 const goals = {
@@ -122,7 +123,7 @@ export default function PortalClient({ initialUser }: { initialUser: User }) {
 
   const act = async (action: string, payload: Record<string, unknown>) => {
     if (requestLock.current || loading || recovery?.action || !data) return false;
-    if ((action === "revoke" || action === "generate_ai") && !discardReview()) return false;
+    if ((action === "revoke" || action === "generate_ai" || action === "reconcile_ai") && !discardReview()) return false;
     requestLock.current = true;
     setBusy(action); setError(""); setNotice(""); setRecovery(null);
     let confirmed = false;
@@ -146,7 +147,7 @@ export default function PortalClient({ initialUser }: { initialUser: User }) {
       if (action === "create") {
         setHasIntakeDraft(false); setDraftEpoch(value => value + 1); setView("overview");
       }
-      setNotice(({ create: "Sua necessidade foi registrada.", generate: "Diagnóstico inicial preparado para revisão.", generate_ai: "Rascunho com IA preparado. Revise a nova versão antes de aprovar.", review: "Versão revisada e aprovada. Confira a nova versão antes de publicar.", publish: "A versão aprovada foi publicada para o cliente.", revoke: "A publicação foi revogada. O histórico permanece preservado." } as Record<string, string>)[action] ?? "Etapa concluída.");
+      setNotice(({ create: "Sua necessidade foi registrada.", generate: "Diagnóstico inicial preparado para revisão.", generate_ai: "Rascunho com IA preparado. Revise a nova versão antes de aprovar.", reconcile_ai: "Reserva conciliada pelo valor máximo estimado; o gasto real segue não confirmado.", review: "Versão revisada e aprovada. Confira a nova versão antes de publicar.", publish: "A versão aprovada foi publicada para o cliente.", revoke: "A publicação foi revogada. O histórico permanece preservado." } as Record<string, string>)[action] ?? "Etapa concluída.");
       // Refresh page one after writes, retaining the acknowledged case if an
       // older page's case is outside it. Identity changes discard that case.
       acceptPortal(await load(), { retainedCase: saved });
@@ -214,6 +215,7 @@ export default function PortalClient({ initialUser }: { initialUser: User }) {
           {view === "overview" && <>
             <div className="page-heading"><div><h1 ref={heading} tabIndex={-1}>{role === "reviewer" ? "Cada plano, uma decisão consciente." : "Da necessidade ao próximo passo."}</h1><p>{role === "reviewer" ? "Revise o diagnóstico e publique a versão aprovada para o cliente." : "Acompanhe seu diagnóstico e avance com a Camaleão."}</p></div><button className="button primary" onClick={openWizard} disabled={actionsBlocked}><Plus size={17} /> {hasIntakeDraft ? "Retomar necessidade" : "Nova necessidade"}</button></div>
             {role === "reviewer" && <p className="mode-note" role="status">Preparação com IA: {data?.ai?.reason ?? "Carregando disponibilidade."}</p>}
+            {role === "reviewer" && data?.pendingAi && <AiReconciliation item={data.pendingAi} busy={actionsBlocked} onAction={act} />}
             <div className="stats-grid"><div className="stat-card"><span>Pedidos carregados</span><strong>{data ? cases.length.toString().padStart(2, "0") : "—"}</strong><Layers size={20} /></div><div className="stat-card"><span>Em revisão entre os carregados</span><strong>{data ? reviewingCount.toString().padStart(2, "0") : "—"}</strong><ShieldCheck size={20} /></div><div className="stat-card"><span>Publicados entre os carregados</span><strong>{data ? publishedCount.toString().padStart(2, "0") : "—"}</strong><FileText size={20} /></div></div>
             <div className="section-heading"><h2>{role === "reviewer" ? "Fila de diagnósticos" : "Sua jornada com a Camaleão"}</h2><button className="quiet-button" onClick={refresh} disabled={loading || busy !== null}><RefreshCw size={14} className={loading ? "spin" : ""} /> Atualizar</button></div>
             {loading && !data ? <div className="empty-state" role="status"><LoaderCircle className="spin" size={24} /><h3>Carregando seu espaço</h3><p>Buscando seus pedidos e as últimas versões.</p></div> : !data ? <div className="empty-state"><h2>Seu espaço ainda não foi carregado.</h2><p>Use “Conferir estado salvo” para recuperar seus pedidos antes de registrar uma nova necessidade.</p></div> : cases.length === 0 ? <div className="empty-state"><span className="empty-icon"><Workflow size={28} /></span><span className="eyebrow">COMECE COM O QUE VOCÊ PRECISA</span><h2>Sua primeira solução começa<br />com uma boa pergunta.</h2><p>Você não precisa escolher a tecnologia agora. Conte a necessidade, e nós organizamos os próximos passos.</p><button className="button primary" disabled={actionsBlocked} onClick={openWizard}>Iniciar meu diagnóstico <ArrowRight size={17} /></button></div> : <div className="cases-layout"><div className="case-list" aria-label="Pedidos">{cases.map((item) => { const GoalIcon = goals[item.intake.goal]?.Icon ?? FileText; return <button key={item.id} className={`case-card ${selected?.id === item.id ? "selected" : ""}`} disabled={busy !== null || loading} aria-pressed={selected?.id === item.id} onClick={() => selectCase(item.id)}><span className="case-card-icon"><GoalIcon size={20} /></span><span className="case-card-copy"><strong>{goals[item.intake.goal]?.short ?? "Diagnóstico"}</strong><small>Pedido {item.id.slice(0, 8)} · {dateLabel(item.created_at)}</small><span className={`status-tag stage-${item.status}`}>{shortLabels[item.status]}</span></span><ArrowUpRight size={15} /></button>; })}<p role="status">{cases.length} pedido(s) carregado(s).{data.nextCursor ? " Há mais pedidos disponíveis." : " Fim da lista carregada."}</p>{data.nextCursor && <button className="button" disabled={actionsBlocked} onClick={loadMore}>{busy === "load_more" ? "Carregando…" : "Carregar mais"}</button>}</div>{selected && <CaseDetail key={reviewIdentity(selected, role, user.userId)} item={selected} role={role} busy={actionsBlocked ? (busy ?? "sync") : null} onDirty={() => setReviewDirty(true)} apiConfigured={data?.apiConfigured ?? false} ai={data?.ai} onAction={act} />}</div>}
@@ -302,6 +304,18 @@ function CaseDetail({ item, role, busy, apiConfigured, ai, onAction, onDirty }: 
     {role === "client" && item.status !== "published" && <p className="review-pending"><ShieldCheck size={17} /> {item.published ? "Uma nova revisão está em preparação. O diagnóstico publicado acima continua disponível." : "A versão final estará disponível após a revisão e a publicação pela Camaleão."}</p>}
     {role === "reviewer" && item.published && item.status !== "published" && <details className="previous-publication"><summary>Diagnóstico já publicado · versão {item.published.version}</summary><DiagnosticReadout content={item.published.content} /><p className="hash-line">Identificador da publicação: <code>{item.published.hash}</code></p></details>}
   </article>;
+}
+
+function AiReconciliation({ item, busy, onAction }: { item: PendingAi; busy: boolean; onAction: (action: string, payload: Record<string, unknown>) => Promise<boolean> }) {
+  const [confirmed, setConfirmed] = useState(false);
+  const [done, setDone] = useState(false);
+  const reserved = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "USD", minimumFractionDigits: 6 }).format(item.reserved_microusd / 1_000_000);
+  return <section className="review-action ai-preparation" aria-label="Conciliar reserva de IA"><h2>Conferir tentativa anterior</h2>
+    <p>O pedido {item.case_id.slice(0, 8)} tem resultado externo incerto. O painel da OpenAI não registrou uso para a chave antiga na conferência desta tentativa.</p>
+    <p>Esta ação contabiliza o teto reservado de {reserved} como consumo conservador no orçamento do portal. Não declara uma cobrança real, não gera diagnóstico e não faz uma nova chamada à IA. O histórico e a versão de origem permanecem.</p>
+    <label className="check-field"><input type="checkbox" checked={confirmed} disabled={busy || done} onChange={event => setConfirmed(event.target.checked)} /><span>Conferi a operação {item.id.slice(0, 8)} e aceito registrar o teto reservado até a cobrança real ser confirmada.</span></label>
+    <button className="button" disabled={busy || done || !confirmed} onClick={async () => { if (await onAction("reconcile_ai", { operation_id: item.id, confirm: true })) setDone(true); }}>Conciliar pelo teto reservado</button>
+  </section>;
 }
 
 function AiPreparation({ item, ai, busy, onAction }: { item: Case; ai?: AiReadiness; busy: string | null; onAction: (action: string, payload: Record<string, unknown>) => Promise<boolean> }) {
